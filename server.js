@@ -10,10 +10,11 @@ app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json());
 
 // ---------------------------------------------------------------------------
-// Persistent settings (stored as JSON next to the app)
+// Persistent settings (~/.tokenomics/config.json)
 // ---------------------------------------------------------------------------
 
-const SETTINGS_PATH = path.join(__dirname, ".settings.json");
+const SETTINGS_DIR = path.join(process.env.HOME || "", ".tokenomics");
+const SETTINGS_PATH = path.join(SETTINGS_DIR, "config.json");
 
 function readSettings() {
   try {
@@ -25,6 +26,9 @@ function readSettings() {
 }
 
 function writeSettings(settings) {
+  if (!fs.existsSync(SETTINGS_DIR)) {
+    fs.mkdirSync(SETTINGS_DIR, { recursive: true });
+  }
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
 }
 
