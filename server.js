@@ -10,6 +10,30 @@ app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json());
 
 // ---------------------------------------------------------------------------
+// Persistent settings (stored as JSON next to the app)
+// ---------------------------------------------------------------------------
+
+const SETTINGS_PATH = path.join(__dirname, ".settings.json");
+
+function readSettings() {
+  try {
+    if (fs.existsSync(SETTINGS_PATH)) {
+      return JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf-8"));
+    }
+  } catch {}
+  return {};
+}
+
+function writeSettings(settings) {
+  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
+}
+
+function getTokenFromSettings() {
+  const s = readSettings();
+  return s.cursorSessionToken || "";
+}
+
+// ---------------------------------------------------------------------------
 // Session token resolution
 // ---------------------------------------------------------------------------
 
@@ -82,7 +106,14 @@ function getTokenFromDB() {
 }
 
 function resolveToken() {
-  return getTokenFromEnv() || getTokenFromDB();
+  return getTokenFromSettings() || getTokenFromEnv() || getTokenFromDB();
+}
+
+function resolveTokenSource() {
+  if (getTokenFromSettings()) return "settings";
+  if (getTokenFromEnv()) return "env";
+  if (getTokenFromDB()) return "local-db";
+  return "none";
 }
 
 // ---------------------------------------------------------------------------
@@ -215,9 +246,41 @@ app.get("/api/status", (_req, res) => {
   const token = resolveToken();
   res.json({
     hasToken: !!token,
-    tokenSource: getTokenFromEnv() ? "env" : getTokenFromDB() ? "local-db" : "none",
+    tokenSource: resolveTokenSource(),
     platforms: ["cursor"],
   });
+});
+
+// ---------------------------------------------------------------------------
+// Settings API
+// ---------------------------------------------------------------------------
+
+app.get("/api/settings", (_req, res) => {
+  const source = resolveTokenSource();
+  const token = resolveToken();
+  res.json({
+    tokenSource: source,
+    hasToken: !!token,
+    maskedToken: token ? token.slice(0, 8) + "..." + token.slice(-4) : "",
+  });
+});
+
+app.put("/api/settings/token", (req, res) => {
+  const { token } = req.body;
+  if (!token || typeof token !== "string" || !token.trim()) {
+    return res.status(400).json({ error: "Token is required" });
+  }
+  const settings = readSettings();
+  settings.cursorSessionToken = token.trim();
+  writeSettings(settings);
+  res.json({ ok: true, tokenSource: "settings" });
+});
+
+app.delete("/api/settings/token", (_req, res) => {
+  const settings = readSettings();
+  delete settings.cursorSessionToken;
+  writeSettings(settings);
+  res.json({ ok: true, tokenSource: resolveTokenSource() });
 });
 
 // ---------------------------------------------------------------------------

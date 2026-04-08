@@ -69,9 +69,16 @@ electronApp.whenReady().then(() => {
     mb.window.webContents.executeJavaScript(
       `document.body.scrollHeight`
     ).then((h) => {
-      mb.window.setSize(320, Math.min(Math.max(h + 8, 100), 600));
+      mb.window.setSize(320, Math.min(Math.max(h + 8, 100), 700));
     }).catch(() => {});
   }
+
+  // Re-fit when the page signals a layout change (e.g. settings panel toggled)
+  electronApp.on("web-contents-created", (_e, wc) => {
+    wc.on("console-message", (_ev, _level, msg) => {
+      if (msg === "__resize__") resizeToFit();
+    });
+  });
 });
 
 async function updateTrayTitle() {

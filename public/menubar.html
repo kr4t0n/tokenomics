@@ -46,6 +46,61 @@ tailwind.config = {
       <span id="statusDot" class="w-2 h-2 rounded-full bg-accent2"></span>
       <button onclick="loadAll()"
               class="text-txt2 hover:text-txt text-xs transition">Refresh</button>
+      <button onclick="toggleSettings()" id="settingsBtn"
+              class="text-txt2 hover:text-txt transition" title="Settings">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65
+                   1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65
+                   1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83
+                   l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1
+                   0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0
+                   0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2
+                   2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06
+                   a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0
+                   1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Settings Panel -->
+  <div id="settingsPanel" class="hidden mb-4">
+    <div class="bg-surface rounded-lg border border-border p-3 space-y-3">
+      <div class="flex items-center justify-between">
+        <span class="text-[0.65rem] font-semibold text-txt2 uppercase tracking-widest">Settings</span>
+        <span id="tokenSourceBadge"
+              class="text-[0.6rem] px-1.5 py-0.5 rounded bg-surface2 text-txt2"></span>
+      </div>
+
+      <div>
+        <label class="text-xs text-txt2 block mb-1">Cursor Session Token</label>
+        <input id="tokenInput" type="password" spellcheck="false" autocomplete="off"
+               placeholder="Paste your WorkosCursorSessionToken..."
+               class="w-full bg-surface2 border border-border rounded px-2 py-1.5
+                      text-xs text-txt placeholder-txt2/50
+                      focus:outline-none focus:border-accent/60 transition" />
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button onclick="saveToken()"
+                class="px-3 py-1 bg-accent/20 text-accent text-xs rounded
+                       hover:bg-accent/30 transition font-medium">Save</button>
+        <button onclick="clearToken()"
+                class="px-3 py-1 bg-surface2 text-txt2 text-xs rounded
+                       hover:bg-danger/20 hover:text-danger transition">Clear</button>
+        <button onclick="toggleTokenVisibility()" id="toggleVisBtn"
+                class="ml-auto text-txt2 hover:text-txt transition" title="Show/hide token">
+          <svg id="eyeIcon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+        </button>
+      </div>
+
+      <p id="settingsMsg" class="text-[0.6rem] text-txt2 hidden"></p>
     </div>
   </div>
 
@@ -206,6 +261,90 @@ function render(usage, invoice, hardLimit) {
 
   $("#loading").classList.add("hidden");
   $("#dashboard").classList.remove("hidden");
+}
+
+// ---------------------------------------------------------------------------
+// Settings panel
+// ---------------------------------------------------------------------------
+
+function toggleSettings() {
+  const panel = $("#settingsPanel");
+  const isHidden = panel.classList.contains("hidden");
+  panel.classList.toggle("hidden");
+  if (isHidden) loadSettings();
+  requestAnimationFrame(() => console.log("__resize__"));
+}
+
+function toggleTokenVisibility() {
+  const input = $("#tokenInput");
+  input.type = input.type === "password" ? "text" : "password";
+}
+
+async function loadSettings() {
+  try {
+    const res = await fetch("/api/settings");
+    const data = await res.json();
+    const badge = $("#tokenSourceBadge");
+    const sourceLabels = {
+      settings: "custom token",
+      env: "from .env",
+      "local-db": "auto-detected",
+      none: "not configured",
+    };
+    badge.textContent = sourceLabels[data.tokenSource] || data.tokenSource;
+    badge.className = "text-[0.6rem] px-1.5 py-0.5 rounded " +
+      (data.tokenSource === "none"
+        ? "bg-danger/20 text-danger"
+        : data.tokenSource === "settings"
+          ? "bg-accent/20 text-accent"
+          : "bg-accent2/20 text-accent2");
+    $("#tokenInput").value = "";
+    $("#tokenInput").placeholder = data.hasToken
+      ? data.maskedToken
+      : "Paste your WorkosCursorSessionToken...";
+  } catch {}
+}
+
+function showSettingsMsg(text, isError) {
+  const el = $("#settingsMsg");
+  el.textContent = text;
+  el.className = "text-[0.6rem] " + (isError ? "text-danger" : "text-accent2");
+  el.classList.remove("hidden");
+  setTimeout(() => el.classList.add("hidden"), 3000);
+}
+
+async function saveToken() {
+  const token = $("#tokenInput").value.trim();
+  if (!token) return showSettingsMsg("Paste a token first", true);
+
+  try {
+    const res = await fetch("/api/settings/token", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || "Failed to save");
+    }
+    showSettingsMsg("Token saved — refreshing...", false);
+    $("#tokenInput").value = "";
+    await loadSettings();
+    loadAll();
+  } catch (err) {
+    showSettingsMsg(err.message, true);
+  }
+}
+
+async function clearToken() {
+  try {
+    await fetch("/api/settings/token", { method: "DELETE" });
+    showSettingsMsg("Custom token cleared", false);
+    await loadSettings();
+    loadAll();
+  } catch (err) {
+    showSettingsMsg(err.message, true);
+  }
 }
 
 loadAll();
