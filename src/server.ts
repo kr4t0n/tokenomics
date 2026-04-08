@@ -1,12 +1,20 @@
-const express = require("express");
-const path = require("path");
-const fs = require("fs");
-const { execSync } = require("child_process");
+import express, { Request, Response } from "express";
+import path from "path";
+import fs from "fs";
+import { execSync } from "child_process";
+import type {
+  Settings,
+  TeamInfo,
+  TeamInfoCache,
+  TeamSpendResponse,
+  TeamDashboardResponse,
+  TokenSource,
+} from "./types";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.static(path.join(__dirname, "..", "public")));
 app.use(express.json());
 
 // ---------------------------------------------------------------------------
@@ -16,7 +24,7 @@ app.use(express.json());
 const SETTINGS_DIR = path.join(process.env.HOME || "", ".tokenomics");
 const SETTINGS_PATH = path.join(SETTINGS_DIR, "config.json");
 
-function readSettings() {
+function readSettings(): Settings {
   try {
     if (fs.existsSync(SETTINGS_PATH)) {
       return JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf-8"));
@@ -25,14 +33,14 @@ function readSettings() {
   return {};
 }
 
-function writeSettings(settings) {
+function writeSettings(settings: Settings): void {
   if (!fs.existsSync(SETTINGS_DIR)) {
     fs.mkdirSync(SETTINGS_DIR, { recursive: true });
   }
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
 }
 
-function getTokenFromSettings() {
+function getTokenFromSettings(): string {
   const s = readSettings();
   return s.cursorSessionToken || "";
 }
@@ -41,51 +49,53 @@ function getTokenFromSettings() {
 // Session token resolution
 // ---------------------------------------------------------------------------
 
-function getTokenFromEnv() {
+function getTokenFromEnv(): string {
   return process.env.CURSOR_SESSION_TOKEN || "";
 }
 
-function getTokenFromDB() {
+function getTokenFromDB(): string {
+  const home = process.env.HOME || "";
   const dbPath =
     process.platform === "darwin"
       ? path.join(
-          process.env.HOME,
+          home,
           "Library/Application Support/Cursor/User/globalStorage/state.vscdb"
         )
       : process.platform === "win32"
         ? path.join(
-            process.env.APPDATA,
+            process.env.APPDATA || "",
             "Cursor/User/globalStorage/state.vscdb"
           )
         : path.join(
-            process.env.HOME,
+            home,
             ".config/Cursor/User/globalStorage/state.vscdb"
           );
 
   if (!fs.existsSync(dbPath)) return "";
 
   try {
-    let jwt;
+    let jwt: string;
     try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
       const Database = require("better-sqlite3");
       const db = new Database(dbPath, { readonly: true });
-      const row = db.prepare("SELECT value FROM ItemTable WHERE key = ?").get(
-        "cursorAuth/accessToken"
-      );
+      const row = db
+        .prepare("SELECT value FROM ItemTable WHERE key = ?")
+        .get("cursorAuth/accessToken") as { value: Buffer | string } | undefined;
       db.close();
       if (!row) return "";
       jwt = row.value.toString().replace(/^"|"$/g, "");
-    } catch (e1) {
-      // Fallback: use sqlite3 CLI (ships with macOS / most Linux)
+    } catch (e1: any) {
       try {
-        const sqlite3Bin = process.platform === "darwin" ? "/usr/bin/sqlite3" : "sqlite3";
+        const sqlite3Bin =
+          process.platform === "darwin" ? "/usr/bin/sqlite3" : "sqlite3";
         const raw = execSync(
           `${sqlite3Bin} "${dbPath}" "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'"`,
           { encoding: "utf-8", timeout: 5000 }
         ).trim();
         if (!raw) return "";
         jwt = raw.replace(/^"|"$/g, "");
-      } catch (e2) {
+      } catch (e2: any) {
         console.error("[token] better-sqlite3:", e1.message);
         console.error("[token] sqlite3 CLI:", e2.message);
         return "";
@@ -99,21 +109,21 @@ function getTokenFromDB() {
     const payload = JSON.parse(
       Buffer.from(payloadB64, "base64").toString("utf-8")
     );
-    const sub = payload.sub || "";
+    const sub: string = payload.sub || "";
     const userId = sub.includes("|") ? sub.split("|")[1] : sub;
     if (!userId) return "";
     return `${userId}%3A%3A${jwt}`;
-  } catch (err) {
+  } catch (err: any) {
     console.error("[token] failed to read Cursor DB:", err.message);
     return "";
   }
 }
 
-function resolveToken() {
+function resolveToken(): string {
   return getTokenFromSettings() || getTokenFromEnv() || getTokenFromDB();
 }
 
-function resolveTokenSource() {
+function resolveTokenSource(): TokenSource {
   if (getTokenFromSettings()) return "settings";
   if (getTokenFromEnv()) return "env";
   if (getTokenFromDB()) return "local-db";
@@ -124,7 +134,7 @@ function resolveTokenSource() {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const BROWSER_HEADERS = (token) => ({
+const BROWSER_HEADERS = (token: string): Record<string, string> => ({
   "Content-Type": "application/json",
   Cookie: `WorkosCursorSessionToken=${token}`,
   Origin: "https://cursor.com",
@@ -133,10 +143,12 @@ const BROWSER_HEADERS = (token) => ({
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
 });
 
-async function cursorGet(url, token, params) {
-  const qs = params
-    ? "?" + new URLSearchParams(params).toString()
-    : "";
+async function cursorGet(
+  url: string,
+  token: string,
+  params?: Record<string, string>
+): Promise<any> {
+  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
   const res = await fetch(url + qs, {
     headers: {
       Cookie: `WorkosCursorSessionToken=${token}`,
@@ -147,7 +159,11 @@ async function cursorGet(url, token, params) {
   return res.json();
 }
 
-async function cursorPost(url, token, body = {}) {
+async function cursorPost(
+  url: string,
+  token: string,
+  body: Record<string, any> = {}
+): Promise<any> {
   const res = await fetch(url, {
     method: "POST",
     headers: BROWSER_HEADERS(token),
@@ -161,26 +177,30 @@ async function cursorPost(url, token, body = {}) {
 // API routes
 // ---------------------------------------------------------------------------
 
-app.get("/api/cursor/usage", async (_req, res) => {
+app.get("/api/cursor/usage", async (_req: Request, res: Response) => {
   const token = resolveToken();
-  if (!token) return res.status(401).json({ error: "No Cursor session token configured" });
+  if (!token)
+    return res.status(401).json({ error: "No Cursor session token configured" });
 
   try {
     const userId = token.split("%3A%3A")[0];
-    const data = await cursorGet("https://cursor.com/api/usage", token, { user: userId });
+    const data = await cursorGet("https://cursor.com/api/usage", token, {
+      user: userId,
+    });
     res.json(data);
-  } catch (err) {
+  } catch (err: any) {
     console.error("[cursor/usage]", err.message);
     res.status(502).json({ error: err.message });
   }
 });
 
-app.get("/api/cursor/invoice", async (req, res) => {
+app.get("/api/cursor/invoice", async (req: Request, res: Response) => {
   const token = resolveToken();
-  if (!token) return res.status(401).json({ error: "No Cursor session token configured" });
+  if (!token)
+    return res.status(401).json({ error: "No Cursor session token configured" });
 
-  const month = parseInt(req.query.month) || new Date().getMonth() + 1;
-  const year = parseInt(req.query.year) || new Date().getFullYear();
+  const month = parseInt(req.query.month as string) || new Date().getMonth() + 1;
+  const year = parseInt(req.query.year as string) || new Date().getFullYear();
 
   try {
     const data = await cursorPost(
@@ -189,15 +209,16 @@ app.get("/api/cursor/invoice", async (req, res) => {
       { month, year, includeUsageEvents: false }
     );
     res.json(data);
-  } catch (err) {
+  } catch (err: any) {
     console.error("[cursor/invoice]", err.message);
     res.status(502).json({ error: err.message });
   }
 });
 
-app.get("/api/cursor/hard-limit", async (_req, res) => {
+app.get("/api/cursor/hard-limit", async (_req: Request, res: Response) => {
   const token = resolveToken();
-  if (!token) return res.status(401).json({ error: "No Cursor session token configured" });
+  if (!token)
+    return res.status(401).json({ error: "No Cursor session token configured" });
 
   try {
     const data = await cursorPost(
@@ -206,32 +227,39 @@ app.get("/api/cursor/hard-limit", async (_req, res) => {
       {}
     );
     res.json(data);
-  } catch (err) {
+  } catch (err: any) {
     console.error("[cursor/hard-limit]", err.message);
     res.status(502).json({ error: err.message });
   }
 });
 
-app.get("/api/cursor/usage-based-status", async (_req, res) => {
-  const token = resolveToken();
-  if (!token) return res.status(401).json({ error: "No Cursor session token configured" });
+app.get(
+  "/api/cursor/usage-based-status",
+  async (_req: Request, res: Response) => {
+    const token = resolveToken();
+    if (!token)
+      return res
+        .status(401)
+        .json({ error: "No Cursor session token configured" });
 
-  try {
-    const data = await cursorPost(
-      "https://cursor.com/api/dashboard/get-usage-based-premium-requests",
-      token,
-      {}
-    );
-    res.json(data);
-  } catch (err) {
-    console.error("[cursor/usage-based-status]", err.message);
-    res.status(502).json({ error: err.message });
+    try {
+      const data = await cursorPost(
+        "https://cursor.com/api/dashboard/get-usage-based-premium-requests",
+        token,
+        {}
+      );
+      res.json(data);
+    } catch (err: any) {
+      console.error("[cursor/usage-based-status]", err.message);
+      res.status(502).json({ error: err.message });
+    }
   }
-});
+);
 
-app.get("/api/cursor/stripe-session", async (_req, res) => {
+app.get("/api/cursor/stripe-session", async (_req: Request, res: Response) => {
   const token = resolveToken();
-  if (!token) return res.status(401).json({ error: "No Cursor session token configured" });
+  if (!token)
+    return res.status(401).json({ error: "No Cursor session token configured" });
 
   try {
     const resp = await fetch("https://cursor.com/api/stripeSession", {
@@ -239,14 +267,13 @@ app.get("/api/cursor/stripe-session", async (_req, res) => {
     });
     const text = await resp.text();
     res.json({ url: text.replace(/"/g, "") });
-  } catch (err) {
+  } catch (err: any) {
     console.error("[cursor/stripe]", err.message);
     res.status(502).json({ error: err.message });
   }
 });
 
-// Health / token status
-app.get("/api/status", (_req, res) => {
+app.get("/api/status", (_req: Request, res: Response) => {
   const token = resolveToken();
   res.json({
     hasToken: !!token,
@@ -259,7 +286,7 @@ app.get("/api/status", (_req, res) => {
 // Settings API
 // ---------------------------------------------------------------------------
 
-app.get("/api/settings", (_req, res) => {
+app.get("/api/settings", (_req: Request, res: Response) => {
   const source = resolveTokenSource();
   const token = resolveToken();
   res.json({
@@ -269,7 +296,7 @@ app.get("/api/settings", (_req, res) => {
   });
 });
 
-app.put("/api/settings/token", (req, res) => {
+app.put("/api/settings/token", (req: Request, res: Response) => {
   const { token } = req.body;
   if (!token || typeof token !== "string" || !token.trim()) {
     return res.status(400).json({ error: "Token is required" });
@@ -280,7 +307,7 @@ app.put("/api/settings/token", (req, res) => {
   res.json({ ok: true, tokenSource: "settings" });
 });
 
-app.delete("/api/settings/token", (_req, res) => {
+app.delete("/api/settings/token", (_req: Request, res: Response) => {
   const settings = readSettings();
   delete settings.cursorSessionToken;
   writeSettings(settings);
@@ -291,10 +318,10 @@ app.delete("/api/settings/token", (_req, res) => {
 // Team usage API
 // ---------------------------------------------------------------------------
 
-let _teamInfoCache = { tokenKey: "", data: null, ts: 0 };
+let _teamInfoCache: TeamInfoCache = { tokenKey: "", data: null, ts: 0 };
 const TEAM_CACHE_TTL = 5 * 60 * 1000;
 
-async function getTeamInfo(token) {
+async function getTeamInfo(token: string): Promise<TeamInfo> {
   const tokenKey = token.slice(0, 20);
   if (
     _teamInfoCache.tokenKey === tokenKey &&
@@ -309,9 +336,9 @@ async function getTeamInfo(token) {
     token,
     {}
   );
-  const teams = teamsRes.teams || [];
+  const teams: any[] = teamsRes.teams || [];
   if (!teams.length) {
-    const result = { isTeamMember: false };
+    const result: TeamInfo = { isTeamMember: false };
     _teamInfoCache = { tokenKey, data: result, ts: Date.now() };
     return result;
   }
@@ -323,7 +350,7 @@ async function getTeamInfo(token) {
     { teamId: team.id }
   );
 
-  const result = {
+  const result: TeamInfo = {
     isTeamMember: true,
     teamId: team.id,
     teamName: team.name,
@@ -336,36 +363,38 @@ async function getTeamInfo(token) {
   return result;
 }
 
-app.get("/api/cursor/team-dashboard", async (_req, res) => {
+app.get("/api/cursor/team-dashboard", async (_req: Request, res: Response) => {
   const token = resolveToken();
-  if (!token) return res.json({ isTeamMember: false });
+  if (!token) return res.json({ isTeamMember: false } as TeamDashboardResponse);
 
   try {
     const info = await getTeamInfo(token);
-    if (!info.isTeamMember) return res.json({ isTeamMember: false });
+    if (!info.isTeamMember)
+      return res.json({ isTeamMember: false } as TeamDashboardResponse);
 
-    const spend = await cursorPost(
+    const spend: TeamSpendResponse = await cursorPost(
       "https://cursor.com/api/dashboard/get-team-spend",
       token,
       { teamId: info.teamId }
     );
     const userSpend =
-      spend.teamMemberSpend?.find((m) => m.userId === info.userId) || {};
+      spend.teamMemberSpend?.find((m) => m.userId === info.userId);
 
-    res.json({
+    const response: TeamDashboardResponse = {
       isTeamMember: true,
       teamName: info.teamName,
       pricingStrategy: info.pricingStrategy,
       role: info.role,
-      includedSpendCents: userSpend.includedSpendCents || 0,
-      spendCents: userSpend.spendCents || 0,
-      limitDollars: userSpend.effectivePerUserLimitDollars || 0,
+      includedSpendCents: userSpend?.includedSpendCents || 0,
+      spendCents: userSpend?.spendCents || 0,
+      limitDollars: userSpend?.effectivePerUserLimitDollars || 0,
       cycleStart: spend.subscriptionCycleStart,
       cycleEnd: spend.nextCycleStart,
-    });
-  } catch (err) {
+    };
+    res.json(response);
+  } catch (err: any) {
     console.error("[cursor/team-dashboard]", err.message);
-    res.json({ isTeamMember: false });
+    res.json({ isTeamMember: false } as TeamDashboardResponse);
   }
 });
 
@@ -384,4 +413,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = app;
+export default app;

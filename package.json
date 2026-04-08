@@ -2,10 +2,11 @@
   "name": "tokenomics",
   "version": "1.0.0",
   "description": "Dashboard to track token/request usage across AI coding platforms",
-  "main": "menubar.js",
+  "main": "dist/menubar.js",
   "scripts": {
-    "menubar": "electron menubar.js",
-    "dist": "electron-builder --mac"
+    "build": "tsc",
+    "menubar": "tsc && electron dist/menubar.js",
+    "dist": "tsc && electron-builder --mac"
   },
   "keywords": [
     "cursor",
@@ -20,8 +21,12 @@
     "menubar": "^9.5.2"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.5.2",
     "electron": "^34.5.8",
-    "electron-builder": "^26.8.1"
+    "electron-builder": "^26.8.1",
+    "typescript": "^6.0.2"
   },
   "build": {
     "appId": "com.tokenomics.app",
@@ -31,8 +36,7 @@
       "category": "public.app-category.developer-tools"
     },
     "files": [
-      "server.js",
-      "menubar.js",
+      "dist/**/*",
       "public/**/*"
     ]
   }
