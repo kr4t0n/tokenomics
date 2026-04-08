@@ -49,10 +49,6 @@ function getTokenFromSettings(): string {
 // Session token resolution
 // ---------------------------------------------------------------------------
 
-function getTokenFromEnv(): string {
-  return process.env.CURSOR_SESSION_TOKEN || "";
-}
-
 function getTokenFromDB(): string {
   const home = process.env.HOME || "";
   const dbPath =
@@ -120,12 +116,11 @@ function getTokenFromDB(): string {
 }
 
 function resolveToken(): string {
-  return getTokenFromSettings() || getTokenFromEnv() || getTokenFromDB();
+  return getTokenFromSettings() || getTokenFromDB();
 }
 
 function resolveTokenSource(): TokenSource {
   if (getTokenFromSettings()) return "settings";
-  if (getTokenFromEnv()) return "env";
   if (getTokenFromDB()) return "local-db";
   return "none";
 }
@@ -407,7 +402,7 @@ if (require.main === module) {
     const token = resolveToken();
     console.log(`\n  Tokenomics dashboard → http://localhost:${PORT}`);
     console.log(
-      `  Cursor token: ${token ? `found (${getTokenFromEnv() ? "env" : "local DB"})` : "⚠ not found — set CURSOR_SESSION_TOKEN in .env or ensure Cursor is installed"}`
+      `  Cursor token: ${token ? `found (${resolveTokenSource()})` : "⚠ not found — configure via settings panel or ensure Cursor is installed"}`
     );
     console.log();
   });

@@ -65,4 +65,4 @@ export interface CursorUsageResponse {
   [key: string]: CursorUsageModel | string;
 }
 
-export type TokenSource = "settings" | "env" | "local-db" | "none";
+export type TokenSource = "settings" | "local-db" | "none";
