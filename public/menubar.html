@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>tokenomics</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        bg:      '#0b0f1a',
+        surface: '#131826',
+        surface2:'#1a2035',
+        border:  '#232a3e',
+        txt:     '#e4e8f1',
+        txt2:    '#8b95b0',
+        accent:  '#6c8cff',
+        accent2: '#4ecdc4',
+        warn:    '#f7b955',
+        danger:  '#ff6b6b',
+      }
+    }
+  }
+}
+</script>
+<style>
+  body { -webkit-app-region: no-drag; user-select: none; }
+  .progress-gradient { background: linear-gradient(90deg, #6c8cff, #4ecdc4); }
+  .progress-warn     { background: linear-gradient(90deg, #f7b955, #e89b2d); }
+  .progress-danger   { background: linear-gradient(90deg, #ff6b6b, #e04a4a); }
+</style>
+</head>
+<body class="bg-bg text-txt text-sm font-sans leading-relaxed antialiased">
+
+<div class="px-4 pt-4 pb-4">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-4">
+    <h1 class="text-base font-bold tracking-tight">
+      <span class="text-accent">tokenomics</span>
+    </h1>
+    <div class="flex items-center gap-2">
+      <span id="statusDot" class="w-2 h-2 rounded-full bg-accent2"></span>
+      <button onclick="loadAll()"
+              class="text-txt2 hover:text-txt text-xs transition">Refresh</button>
+    </div>
+  </div>
+
+  <!-- Loading -->
+  <div id="loading" class="space-y-4">
+    <div class="h-10 bg-surface rounded-lg animate-pulse"></div>
+    <div class="h-10 bg-surface rounded-lg animate-pulse"></div>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="dashboard" class="hidden space-y-4">
+
+    <!-- Cursor section -->
+    <div class="text-[0.65rem] font-semibold text-txt2 uppercase tracking-widest mb-1">Cursor</div>
+
+    <!-- Requests progress -->
+    <div>
+      <div class="flex justify-between text-xs mb-1">
+        <span class="text-txt2">Requests</span>
+        <span><span class="text-txt font-semibold" id="reqText">0 / 0</span></span>
+      </div>
+      <div class="h-2 bg-surface2 rounded-full overflow-hidden">
+        <div id="reqFill"
+             class="h-full rounded-full transition-all duration-500 progress-gradient"
+             style="width:0%"></div>
+      </div>
+      <div class="flex justify-between text-[0.6rem] text-txt2 mt-1">
+        <span id="reqPct"></span>
+        <span id="reqCycle"></span>
+      </div>
+    </div>
+
+    <!-- On-demand progress -->
+    <div>
+      <div class="flex justify-between text-xs mb-1">
+        <span class="text-txt2">On-Demand</span>
+        <span class="text-txt font-semibold" id="demandText">$0.00</span>
+      </div>
+      <div class="h-2 bg-surface2 rounded-full overflow-hidden">
+        <div id="demandFill"
+             class="h-full rounded-full transition-all duration-500 progress-gradient"
+             style="width:0%"></div>
+      </div>
+      <div class="flex justify-between text-[0.6rem] text-txt2 mt-1">
+        <span id="demandDetail"></span>
+        <span id="demandLimit"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Error -->
+  <div id="errorState" class="hidden">
+    <div class="text-center py-6 text-txt2">
+      <p class="text-xs" id="errorMsg">Could not load data.</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+
+function showError(msg) {
+  $("#loading").classList.add("hidden");
+  $("#dashboard").classList.add("hidden");
+  $("#errorState").classList.remove("hidden");
+  $("#errorMsg").textContent = msg;
+  $("#statusDot").className = "w-2 h-2 rounded-full bg-danger";
+}
+
+async function loadAll() {
+  $("#loading").classList.remove("hidden");
+  $("#dashboard").classList.add("hidden");
+  $("#errorState").classList.add("hidden");
+
+  try {
+    const [usageRes, invoiceRes, hardLimitRes] = await Promise.all([
+      fetch("/api/cursor/usage"),
+      fetch("/api/cursor/invoice"),
+      fetch("/api/cursor/hard-limit"),
+    ]);
+
+    if (!usageRes.ok) {
+      const e = await usageRes.json().catch(() => ({}));
+      throw new Error(e.error || `API error ${usageRes.status}`);
+    }
+
+    const usage = await usageRes.json();
+    const invoice = invoiceRes.ok ? await invoiceRes.json() : null;
+    const hardLimit = hardLimitRes.ok ? await hardLimitRes.json() : null;
+
+    render(usage, invoice, hardLimit);
+    $("#statusDot").className = "w-2 h-2 rounded-full bg-accent2";
+  } catch (err) {
+    console.error(err);
+    showError(err.message);
+  }
+}
+
+function render(usage, invoice, hardLimit) {
+  const gpt4 = usage["gpt-4"] || {};
+  const used = gpt4.numRequests || 0;
+  const limit = gpt4.maxRequestUsage || 0;
+  const startOfMonth = usage.startOfMonth;
+
+  // Requests bar
+  if (limit) {
+    const pct = Math.min(100, (used / limit) * 100);
+    $("#reqText").textContent = `${used.toLocaleString()} / ${limit.toLocaleString()}`;
+    $("#reqPct").textContent = pct.toFixed(1) + "%";
+    const fill = $("#reqFill");
+    fill.style.width = pct + "%";
+    fill.className = "h-full rounded-full transition-all duration-500 " +
+      (pct > 90 ? "progress-danger" : pct > 70 ? "progress-warn" : "progress-gradient");
+  } else {
+    $("#reqText").textContent = `${used.toLocaleString()} used`;
+    $("#reqPct").textContent = "";
+    $("#reqFill").style.width = "0%";
+  }
+
+  if (startOfMonth) {
+    const start = new Date(startOfMonth);
+    const end = new Date(start); end.setMonth(end.getMonth() + 1);
+    const daysLeft = Math.max(0, Math.ceil((end - Date.now()) / 86400000));
+    $("#reqCycle").textContent = `${daysLeft}d left`;
+  }
+
+  // On-demand bar
+  let totalCents = 0;
+  let totalReqs = 0;
+  if (invoice?.items) {
+    for (const item of invoice.items) {
+      if (typeof item.cents === "undefined") continue;
+      if (item.description?.includes("Mid-month usage paid")) continue;
+      totalCents += item.cents;
+      const m = item.description?.match(/^(\d+)/);
+      if (m) totalReqs += parseInt(m[1]);
+    }
+  }
+
+  const totalDollars = totalCents / 100;
+  const limitDollars = hardLimit?.noUsageBasedAllowed ? 0 : (hardLimit?.hardLimit || 0);
+
+  $("#demandText").textContent = `$${totalDollars.toFixed(2)}`;
+
+  if (limitDollars > 0) {
+    const pct = Math.min(100, (totalDollars / limitDollars) * 100);
+    $("#demandFill").style.width = pct + "%";
+    $("#demandFill").className = "h-full rounded-full transition-all duration-500 " +
+      (pct > 90 ? "progress-danger" : pct > 70 ? "progress-warn" : "progress-gradient");
+    $("#demandLimit").textContent = `limit $${limitDollars}`;
+  } else {
+    $("#demandFill").style.width = "0%";
+    $("#demandLimit").textContent = totalCents === 0 ? "none" : "";
+  }
+
+  $("#demandDetail").textContent = totalReqs > 0 ? `${totalReqs.toLocaleString()} req` : "";
+
+  $("#loading").classList.add("hidden");
+  $("#dashboard").classList.remove("hidden");
+}
+
+loadAll();
+</script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+{
+  "name": "tokenomics",
+  "version": "1.0.0",
+  "description": "Dashboard to track token/request usage across AI coding platforms",
+  "main": "menubar.js",
+  "scripts": {
+    "menubar": "electron menubar.js",
+    "dist": "electron-builder --mac"
+  },
+  "keywords": [
+    "cursor",
+    "usage",
+    "dashboard",
+    "tokens"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "express": "^4.21.2",
+    "menubar": "^9.5.2"
+  },
+  "devDependencies": {
+    "electron": "^34.5.8",
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "com.tokenomics.app",
+    "productName": "tokenomics",
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.developer-tools"
+    },
+    "files": [
+      "server.js",
+      "menubar.js",
+      "public/**/*"
+    ]
+  }
+}
