@@ -284,6 +284,88 @@ app.delete("/api/settings/token", (_req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Team usage API
+// ---------------------------------------------------------------------------
+
+let _teamInfoCache = { tokenKey: "", data: null, ts: 0 };
+const TEAM_CACHE_TTL = 5 * 60 * 1000;
+
+async function getTeamInfo(token) {
+  const tokenKey = token.slice(0, 20);
+  if (
+    _teamInfoCache.tokenKey === tokenKey &&
+    _teamInfoCache.data &&
+    Date.now() - _teamInfoCache.ts < TEAM_CACHE_TTL
+  ) {
+    return _teamInfoCache.data;
+  }
+
+  const teamsRes = await cursorPost(
+    "https://cursor.com/api/dashboard/teams",
+    token,
+    {}
+  );
+  const teams = teamsRes.teams || [];
+  if (!teams.length) {
+    const result = { isTeamMember: false };
+    _teamInfoCache = { tokenKey, data: result, ts: Date.now() };
+    return result;
+  }
+
+  const team = teams[0];
+  const teamDetail = await cursorPost(
+    "https://cursor.com/api/dashboard/team",
+    token,
+    { teamId: team.id }
+  );
+
+  const result = {
+    isTeamMember: true,
+    teamId: team.id,
+    teamName: team.name,
+    userId: teamDetail.userId,
+    role: team.role,
+    pricingStrategy: team.pricingStrategy || "requests",
+    seats: team.seats,
+  };
+  _teamInfoCache = { tokenKey, data: result, ts: Date.now() };
+  return result;
+}
+
+app.get("/api/cursor/team-dashboard", async (_req, res) => {
+  const token = resolveToken();
+  if (!token) return res.json({ isTeamMember: false });
+
+  try {
+    const info = await getTeamInfo(token);
+    if (!info.isTeamMember) return res.json({ isTeamMember: false });
+
+    const spend = await cursorPost(
+      "https://cursor.com/api/dashboard/get-team-spend",
+      token,
+      { teamId: info.teamId }
+    );
+    const userSpend =
+      spend.teamMemberSpend?.find((m) => m.userId === info.userId) || {};
+
+    res.json({
+      isTeamMember: true,
+      teamName: info.teamName,
+      pricingStrategy: info.pricingStrategy,
+      role: info.role,
+      includedSpendCents: userSpend.includedSpendCents || 0,
+      spendCents: userSpend.spendCents || 0,
+      limitDollars: userSpend.effectivePerUserLimitDollars || 0,
+      cycleStart: spend.subscriptionCycleStart,
+      cycleEnd: spend.nextCycleStart,
+    });
+  } catch (err) {
+    console.error("[cursor/team-dashboard]", err.message);
+    res.json({ isTeamMember: false });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Start (only when run directly, not when required as a module)
 // ---------------------------------------------------------------------------
 

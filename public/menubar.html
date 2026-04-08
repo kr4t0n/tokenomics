@@ -113,13 +113,13 @@ tailwind.config = {
   <!-- Dashboard -->
   <div id="dashboard" class="hidden space-y-4">
 
-    <!-- Cursor section -->
-    <div class="text-[0.65rem] font-semibold text-txt2 uppercase tracking-widest mb-1">Cursor</div>
+    <!-- Section title -->
+    <div id="sectionTitle" class="text-[0.65rem] font-semibold text-txt2 uppercase tracking-widest mb-1">Cursor</div>
 
     <!-- Requests progress -->
     <div>
       <div class="flex justify-between text-xs mb-1">
-        <span class="text-txt2">Requests</span>
+        <span class="text-txt2" id="reqLabel">Requests</span>
         <span><span class="text-txt font-semibold" id="reqText">0 / 0</span></span>
       </div>
       <div class="h-2 bg-surface2 rounded-full overflow-hidden">
@@ -136,7 +136,7 @@ tailwind.config = {
     <!-- On-demand progress -->
     <div>
       <div class="flex justify-between text-xs mb-1">
-        <span class="text-txt2">On-Demand</span>
+        <span class="text-txt2" id="demandLabel">On-Demand</span>
         <span class="text-txt font-semibold" id="demandText">$0.00</span>
       </div>
       <div class="h-2 bg-surface2 rounded-full overflow-hidden">
@@ -177,22 +177,28 @@ async function loadAll() {
   $("#errorState").classList.add("hidden");
 
   try {
-    const [usageRes, invoiceRes, hardLimitRes] = await Promise.all([
+    const [teamRes, usageRes, invoiceRes, hardLimitRes] = await Promise.all([
+      fetch("/api/cursor/team-dashboard"),
       fetch("/api/cursor/usage"),
       fetch("/api/cursor/invoice"),
       fetch("/api/cursor/hard-limit"),
     ]);
 
-    if (!usageRes.ok) {
-      const e = await usageRes.json().catch(() => ({}));
-      throw new Error(e.error || `API error ${usageRes.status}`);
+    const team = teamRes.ok ? await teamRes.json().catch(() => ({})) : {};
+
+    if (team.isTeamMember && team.pricingStrategy === "tokens") {
+      renderTeam(team);
+    } else {
+      if (!usageRes.ok) {
+        const e = await usageRes.json().catch(() => ({}));
+        throw new Error(e.error || `API error ${usageRes.status}`);
+      }
+      const usage = await usageRes.json();
+      const invoice = invoiceRes.ok ? await invoiceRes.json() : null;
+      const hardLimit = hardLimitRes.ok ? await hardLimitRes.json() : null;
+      render(usage, invoice, hardLimit);
     }
 
-    const usage = await usageRes.json();
-    const invoice = invoiceRes.ok ? await invoiceRes.json() : null;
-    const hardLimit = hardLimitRes.ok ? await hardLimitRes.json() : null;
-
-    render(usage, invoice, hardLimit);
     $("#statusDot").className = "w-2 h-2 rounded-full bg-accent2";
   } catch (err) {
     console.error(err);
@@ -200,7 +206,54 @@ async function loadAll() {
   }
 }
 
+function renderTeam(team) {
+  $("#sectionTitle").textContent = team.teamName || "Team";
+
+  // Bar 1: Included usage (subscription-covered spend)
+  $("#reqLabel").textContent = "Included Usage";
+  const includedDollars = (team.includedSpendCents || 0) / 100;
+  $("#reqText").textContent = `$${includedDollars.toFixed(2)}`;
+  $("#reqFill").style.width = "0%";
+  $("#reqFill").className = "h-full rounded-full transition-all duration-500 progress-gradient";
+  $("#reqPct").textContent = "";
+
+  if (team.cycleEnd) {
+    const end = new Date(parseInt(team.cycleEnd));
+    const daysLeft = Math.max(0, Math.ceil((end - Date.now()) / 86400000));
+    $("#reqCycle").textContent = `${daysLeft}d left`;
+  } else {
+    $("#reqCycle").textContent = "";
+  }
+
+  // Bar 2: Usage-based overage spend vs per-user limit
+  $("#demandLabel").textContent = "Usage-Based";
+  const spendDollars = (team.spendCents || 0) / 100;
+  const limitDollars = team.limitDollars || 0;
+  $("#demandText").textContent = `$${spendDollars.toFixed(2)}`;
+
+  if (limitDollars > 0) {
+    const pct = Math.min(100, (spendDollars / limitDollars) * 100);
+    const fill = $("#demandFill");
+    fill.style.width = pct + "%";
+    fill.className = "h-full rounded-full transition-all duration-500 " +
+      (pct > 90 ? "progress-danger" : pct > 70 ? "progress-warn" : "progress-gradient");
+    $("#demandLimit").textContent = `limit $${limitDollars}`;
+  } else {
+    $("#demandFill").style.width = "0%";
+    $("#demandLimit").textContent = spendDollars === 0 ? "none" : "";
+  }
+  $("#demandDetail").textContent = "";
+
+  $("#loading").classList.add("hidden");
+  $("#dashboard").classList.remove("hidden");
+}
+
 function render(usage, invoice, hardLimit) {
+  // Reset labels for individual view
+  $("#sectionTitle").textContent = "Cursor";
+  $("#reqLabel").textContent = "Requests";
+  $("#demandLabel").textContent = "On-Demand";
+
   const gpt4 = usage["gpt-4"] || {};
   const used = gpt4.numRequests || 0;
   const limit = gpt4.maxRequestUsage || 0;

@@ -83,6 +83,16 @@ electronApp.whenReady().then(() => {
 
 async function updateTrayTitle() {
   try {
+    const teamRes = await fetch(`http://localhost:${PORT}/api/cursor/team-dashboard`);
+    if (teamRes.ok) {
+      const team = await teamRes.json();
+      if (team.isTeamMember && team.pricingStrategy === "tokens") {
+        const spend = ((team.includedSpendCents || 0) + (team.spendCents || 0)) / 100;
+        mb?.tray?.setTitle(` $${spend.toFixed(2)}`);
+        return;
+      }
+    }
+
     const res = await fetch(`http://localhost:${PORT}/api/cursor/usage`);
     if (!res.ok) return;
     const data = await res.json();
