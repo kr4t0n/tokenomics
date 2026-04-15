@@ -9,6 +9,10 @@ import type {
   TeamSpendResponse,
   TeamDashboardResponse,
   TokenSource,
+  CodexAuth,
+  CodexQuotaWindow,
+  CodexUsageResponse,
+  CodexTokenSource,
 } from "./types";
 
 const app = express();
@@ -123,6 +127,45 @@ function resolveTokenSource(): TokenSource {
   if (getTokenFromSettings()) return "settings";
   if (getTokenFromDB()) return "local-db";
   return "none";
+}
+
+// ---------------------------------------------------------------------------
+// Codex auth resolution (~/.codex/auth.json)
+// ---------------------------------------------------------------------------
+
+const CODEX_AUTH_PATH = path.join(
+  process.env.CODEX_HOME || path.join(process.env.HOME || "", ".codex"),
+  "auth.json"
+);
+
+function readCodexAuth(): CodexAuth | null {
+  try {
+    if (!fs.existsSync(CODEX_AUTH_PATH)) return null;
+    const raw = JSON.parse(fs.readFileSync(CODEX_AUTH_PATH, "utf-8"));
+    const accessToken: string = raw?.tokens?.access_token || "";
+    const accountId: string = raw?.tokens?.account_id || "";
+    if (!accessToken || !accountId) return null;
+
+    const parts = accessToken.split(".");
+    if (parts.length === 3) {
+      const payload = JSON.parse(
+        Buffer.from(parts[1], "base64").toString("utf-8")
+      );
+      if (typeof payload.exp === "number" && payload.exp * 1000 < Date.now()) {
+        console.error("[codex] access_token expired");
+        return null;
+      }
+    }
+
+    return { accessToken, accountId };
+  } catch (err: any) {
+    console.error("[codex] failed to read auth.json:", err.message);
+    return null;
+  }
+}
+
+function resolveCodexTokenSource(): CodexTokenSource {
+  return readCodexAuth() ? "codex-auth" : "none";
 }
 
 // ---------------------------------------------------------------------------
@@ -268,12 +311,169 @@ app.get("/api/cursor/stripe-session", async (_req: Request, res: Response) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Codex usage API
+// ---------------------------------------------------------------------------
+
+function parseCodexQuotaWindow(
+  name: string,
+  raw: any
+): CodexQuotaWindow | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  // The API nests some windows under a `primary_window` sub-key
+  const w =
+    typeof raw.primary_window === "object" && raw.primary_window
+      ? raw.primary_window
+      : raw;
+
+  const percentLeft =
+    w.percent_left ?? w.remaining_percent ?? (w.used_percent != null ? Math.max(0, 100 - Number(w.used_percent)) : null);
+  const resetRaw = w.reset_time_ms ?? w.reset_at;
+  const windowSeconds = w.limit_window_seconds ?? null;
+
+  if (percentLeft == null) return null;
+
+  let resetAt = "";
+  if (resetRaw != null) {
+    const ts = Number(resetRaw);
+    // Heuristic: values > 10^11 are likely milliseconds, otherwise seconds
+    const ms = ts > 1e11 ? ts : ts * 1000;
+    resetAt = new Date(ms).toISOString();
+  }
+
+  return {
+    percentLeft: Number(percentLeft),
+    resetAt,
+    windowSeconds: windowSeconds != null ? Number(windowSeconds) : name === "five_hour" ? 18000 : 604800,
+  };
+}
+
+function parseCodexUsage(data: any): CodexUsageResponse {
+  const rateLimits =
+    (typeof data?.rate_limit === "object" && data.rate_limit) ||
+    (typeof data?.rate_limits === "object" && data.rate_limits) ||
+    data;
+
+  let fiveHour: CodexQuotaWindow | null = null;
+  let weekly: CodexQuotaWindow | null = null;
+
+  for (const key of ["five_hour", "five_hour_limit", "five_hour_rate_limit", "primary"]) {
+    if (rateLimits[key]) {
+      fiveHour = parseCodexQuotaWindow("five_hour", rateLimits[key]);
+      if (fiveHour) break;
+    }
+  }
+  if (!fiveHour && rateLimits.primary_window) {
+    fiveHour = parseCodexQuotaWindow("five_hour", rateLimits.primary_window);
+  }
+
+  for (const key of ["weekly", "weekly_limit", "weekly_rate_limit", "secondary"]) {
+    if (rateLimits[key]) {
+      weekly = parseCodexQuotaWindow("weekly", rateLimits[key]);
+      if (weekly) break;
+    }
+  }
+  if (!weekly && rateLimits.secondary_window) {
+    weekly = parseCodexQuotaWindow("weekly", rateLimits.secondary_window);
+  }
+
+  // If window durations are present, use them to correct mis-labeled windows
+  if (fiveHour && weekly) {
+    if (fiveHour.windowSeconds >= 6 * 24 * 3600 && weekly.windowSeconds <= 6 * 3600) {
+      [fiveHour, weekly] = [weekly, fiveHour];
+    }
+  }
+
+  return { fiveHour, weekly };
+}
+
+const CHATGPT_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
+
+function fetchChatGPTUsage(auth: CodexAuth): any {
+  const raw = execSync(
+    `curl -s -m 20 -H "Authorization: Bearer ${auth.accessToken}" ` +
+      `-H "Accept: application/json" ` +
+      `-H "ChatGPT-Account-Id: ${auth.accountId}" ` +
+      `-H "Origin: https://chatgpt.com" ` +
+      `-H "Referer: https://chatgpt.com/" ` +
+      `-H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" ` +
+      `"${CHATGPT_USAGE_URL}"`,
+    { encoding: "utf-8", timeout: 25_000 }
+  );
+  return JSON.parse(raw);
+}
+
+app.get("/api/codex/usage", async (_req: Request, res: Response) => {
+  const auth = readCodexAuth();
+  if (!auth)
+    return res.status(401).json({ error: "No Codex auth found in ~/.codex/auth.json" });
+
+  try {
+    const data = fetchChatGPTUsage(auth);
+    res.json(parseCodexUsage(data));
+  } catch (err: any) {
+    console.error("[codex/usage]", err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Codex local token totals (from ~/.codex/state_5.sqlite)
+// ---------------------------------------------------------------------------
+
+function getCodexLocalTokens(): { totalTokens: number; sessions: number } {
+  const codexHome =
+    process.env.CODEX_HOME || path.join(process.env.HOME || "", ".codex");
+  const dbPath = path.join(codexHome, "state_5.sqlite");
+
+  if (!fs.existsSync(dbPath)) return { totalTokens: 0, sessions: 0 };
+
+  try {
+    try {
+      const Database = require("better-sqlite3");
+      const db = new Database(dbPath, { readonly: true });
+      const row = db
+        .prepare(
+          "SELECT COUNT(*) as cnt, COALESCE(SUM(tokens_used), 0) as total FROM threads"
+        )
+        .get() as { cnt: number; total: number };
+      db.close();
+      return { totalTokens: row.total, sessions: row.cnt };
+    } catch {
+      const sqlite3Bin =
+        process.platform === "darwin" ? "/usr/bin/sqlite3" : "sqlite3";
+      const raw = execSync(
+        `${sqlite3Bin} "${dbPath}" "SELECT COUNT(*) || ',' || COALESCE(SUM(tokens_used), 0) FROM threads"`,
+        { encoding: "utf-8", timeout: 5000 }
+      ).trim();
+      const [cnt, total] = raw.split(",").map(Number);
+      return { totalTokens: total || 0, sessions: cnt || 0 };
+    }
+  } catch (err: any) {
+    console.error("[codex/tokens] failed to read state DB:", err.message);
+    return { totalTokens: 0, sessions: 0 };
+  }
+}
+
+app.get("/api/codex/tokens", (_req: Request, res: Response) => {
+  res.json(getCodexLocalTokens());
+});
+
+// ---------------------------------------------------------------------------
+// Status
+// ---------------------------------------------------------------------------
+
 app.get("/api/status", (_req: Request, res: Response) => {
   const token = resolveToken();
+  const codexSource = resolveCodexTokenSource();
+  const platforms: string[] = ["cursor"];
+  if (codexSource !== "none") platforms.push("codex");
   res.json({
     hasToken: !!token,
     tokenSource: resolveTokenSource(),
-    platforms: ["cursor"],
+    codexTokenSource: codexSource,
+    platforms,
   });
 });
 
@@ -400,9 +600,13 @@ app.get("/api/cursor/team-dashboard", async (_req: Request, res: Response) => {
 if (require.main === module) {
   app.listen(PORT, () => {
     const token = resolveToken();
+    const codex = readCodexAuth();
     console.log(`\n  Tokenomics dashboard → http://localhost:${PORT}`);
     console.log(
       `  Cursor token: ${token ? `found (${resolveTokenSource()})` : "⚠ not found — configure via settings panel or ensure Cursor is installed"}`
+    );
+    console.log(
+      `  Codex auth:   ${codex ? "found (~/.codex/auth.json)" : "⚠ not found — run 'codex login' to authenticate"}`
     );
     console.log();
   });

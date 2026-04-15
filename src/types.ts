@@ -66,3 +66,25 @@ export interface CursorUsageResponse {
 }
 
 export type TokenSource = "settings" | "local-db" | "none";
+
+// ---------------------------------------------------------------------------
+// Codex
+// ---------------------------------------------------------------------------
+
+export interface CodexQuotaWindow {
+  percentLeft: number;
+  resetAt: string;
+  windowSeconds: number;
+}
+
+export interface CodexUsageResponse {
+  fiveHour: CodexQuotaWindow | null;
+  weekly: CodexQuotaWindow | null;
+}
+
+export interface CodexAuth {
+  accessToken: string;
+  accountId: string;
+}
+
+export type CodexTokenSource = "codex-auth" | "none";

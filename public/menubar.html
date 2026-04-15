@@ -113,8 +113,11 @@ tailwind.config = {
   <!-- Dashboard -->
   <div id="dashboard" class="hidden space-y-4">
 
-    <!-- Section title -->
-    <div id="sectionTitle" class="text-[0.65rem] font-semibold text-txt2 uppercase tracking-widest mb-1">Cursor</div>
+    <!-- Section title + token total -->
+    <div class="flex items-center justify-between">
+      <div id="sectionTitle" class="text-[0.65rem] font-semibold text-txt2 uppercase tracking-widest">Cursor</div>
+      <span id="cursorTokenTotal" class="text-[0.6rem] text-txt2"></span>
+    </div>
 
     <!-- Requests progress -->
     <div>
@@ -151,6 +154,49 @@ tailwind.config = {
     </div>
   </div>
 
+  <!-- Codex Dashboard -->
+  <div id="codexDashboard" class="hidden space-y-4">
+
+    <div class="flex items-center justify-between">
+      <div class="text-[0.65rem] font-semibold text-txt2 uppercase tracking-widest">Codex</div>
+      <span id="codexTokenTotal" class="text-[0.6rem] text-txt2"></span>
+    </div>
+
+    <!-- 5-Hour Quota -->
+    <div>
+      <div class="flex justify-between text-xs mb-1">
+        <span class="text-txt2">5-Hour Quota</span>
+        <span class="text-txt font-semibold" id="codex5hText">—</span>
+      </div>
+      <div class="h-2 bg-surface2 rounded-full overflow-hidden">
+        <div id="codex5hFill"
+             class="h-full rounded-full transition-all duration-500 progress-gradient"
+             style="width:0%"></div>
+      </div>
+      <div class="flex justify-between text-[0.6rem] text-txt2 mt-1">
+        <span id="codex5hPct"></span>
+        <span id="codex5hReset"></span>
+      </div>
+    </div>
+
+    <!-- Weekly Quota -->
+    <div>
+      <div class="flex justify-between text-xs mb-1">
+        <span class="text-txt2">Weekly Quota</span>
+        <span class="text-txt font-semibold" id="codexWeeklyText">—</span>
+      </div>
+      <div class="h-2 bg-surface2 rounded-full overflow-hidden">
+        <div id="codexWeeklyFill"
+             class="h-full rounded-full transition-all duration-500 progress-gradient"
+             style="width:0%"></div>
+      </div>
+      <div class="flex justify-between text-[0.6rem] text-txt2 mt-1">
+        <span id="codexWeeklyPct"></span>
+        <span id="codexWeeklyReset"></span>
+      </div>
+    </div>
+  </div>
+
   <!-- Error -->
   <div id="errorState" class="hidden">
     <div class="text-center py-6 text-txt2">
@@ -163,9 +209,17 @@ tailwind.config = {
 <script>
 const $ = (sel) => document.querySelector(sel);
 
+function fmtTokens(n) {
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + "B tokens";
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + "M tokens";
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + "K tokens";
+  return n.toLocaleString() + " tokens";
+}
+
 function showError(msg) {
   $("#loading").classList.add("hidden");
   $("#dashboard").classList.add("hidden");
+  $("#codexDashboard").classList.add("hidden");
   $("#errorState").classList.remove("hidden");
   $("#errorMsg").textContent = msg;
   $("#statusDot").className = "w-2 h-2 rounded-full bg-danger";
@@ -174,14 +228,17 @@ function showError(msg) {
 async function loadAll() {
   $("#loading").classList.remove("hidden");
   $("#dashboard").classList.add("hidden");
+  $("#codexDashboard").classList.add("hidden");
   $("#errorState").classList.add("hidden");
 
   try {
-    const [teamRes, usageRes, invoiceRes, hardLimitRes] = await Promise.all([
+    const [teamRes, usageRes, invoiceRes, hardLimitRes, codexRes, codexTokensRes] = await Promise.all([
       fetch("/api/cursor/team-dashboard"),
       fetch("/api/cursor/usage"),
       fetch("/api/cursor/invoice"),
       fetch("/api/cursor/hard-limit"),
+      fetch("/api/codex/usage"),
+      fetch("/api/codex/tokens"),
     ]);
 
     const team = teamRes.ok ? await teamRes.json().catch(() => ({})) : {};
@@ -197,6 +254,15 @@ async function loadAll() {
       const invoice = invoiceRes.ok ? await invoiceRes.json() : null;
       const hardLimit = hardLimitRes.ok ? await hardLimitRes.json() : null;
       render(usage, invoice, hardLimit);
+    }
+
+    const codexTokens = codexTokensRes.ok ? await codexTokensRes.json().catch(() => null) : null;
+    const codex = codexRes.ok ? await codexRes.json().catch(() => null) : null;
+    const hasQuota = codex && (codex.fiveHour || codex.weekly);
+    const hasTokens = codexTokens && codexTokens.totalTokens > 0;
+
+    if (hasQuota || hasTokens) {
+      renderCodex(codex, codexTokens);
     }
 
     $("#statusDot").className = "w-2 h-2 rounded-full bg-accent2";
@@ -253,6 +319,16 @@ function render(usage, invoice, hardLimit) {
   $("#sectionTitle").textContent = "Cursor";
   $("#reqLabel").textContent = "Requests";
   $("#demandLabel").textContent = "On-Demand";
+
+  // Total tokens across all models
+  let cursorTotalTokens = 0;
+  for (const [key, val] of Object.entries(usage)) {
+    if (key === "startOfMonth") continue;
+    if (val && typeof val === "object" && typeof val.numTokens === "number") {
+      cursorTotalTokens += val.numTokens;
+    }
+  }
+  $("#cursorTokenTotal").textContent = cursorTotalTokens > 0 ? fmtTokens(cursorTotalTokens) : "";
 
   const gpt4 = usage["gpt-4"] || {};
   const used = gpt4.numRequests || 0;
@@ -314,6 +390,73 @@ function render(usage, invoice, hardLimit) {
 
   $("#loading").classList.add("hidden");
   $("#dashboard").classList.remove("hidden");
+}
+
+// ---------------------------------------------------------------------------
+// Codex rendering
+// ---------------------------------------------------------------------------
+
+function formatResetCountdown(isoString) {
+  if (!isoString) return "";
+  const ms = new Date(isoString).getTime() - Date.now();
+  if (ms <= 0) return "resetting...";
+  const hours = Math.floor(ms / 3600000);
+  const mins = Math.ceil((ms % 3600000) / 60000);
+  if (hours >= 24) {
+    const days = Math.floor(hours / 24);
+    const remHours = hours % 24;
+    return `resets in ${days}d ${remHours}h`;
+  }
+  if (hours > 0) return `resets in ${hours}h ${mins}m`;
+  return `resets in ${mins}m`;
+}
+
+function quotaBarClass(pctUsed) {
+  if (pctUsed > 90) return "progress-danger";
+  if (pctUsed > 70) return "progress-warn";
+  return "progress-gradient";
+}
+
+function renderCodex(data, tokens) {
+  // Token total
+  if (tokens && tokens.totalTokens > 0) {
+    $("#codexTokenTotal").textContent = fmtTokens(tokens.totalTokens);
+  } else {
+    $("#codexTokenTotal").textContent = "";
+  }
+
+  if (data && data.fiveHour) {
+    const pctLeft = data.fiveHour.percentLeft;
+    const pctUsed = Math.max(0, 100 - pctLeft);
+    $("#codex5hText").textContent = `${pctLeft.toFixed(0)}% left`;
+    $("#codex5hFill").style.width = pctUsed + "%";
+    $("#codex5hFill").className = "h-full rounded-full transition-all duration-500 " + quotaBarClass(pctUsed);
+    $("#codex5hPct").textContent = pctUsed > 0 ? pctUsed.toFixed(1) + "% used" : "";
+    $("#codex5hReset").textContent = formatResetCountdown(data.fiveHour.resetAt);
+  } else {
+    $("#codex5hText").textContent = "—";
+    $("#codex5hFill").style.width = "0%";
+    $("#codex5hPct").textContent = "";
+    $("#codex5hReset").textContent = "";
+  }
+
+  if (data && data.weekly) {
+    const pctLeft = data.weekly.percentLeft;
+    const pctUsed = Math.max(0, 100 - pctLeft);
+    $("#codexWeeklyText").textContent = `${pctLeft.toFixed(0)}% left`;
+    $("#codexWeeklyFill").style.width = pctUsed + "%";
+    $("#codexWeeklyFill").className = "h-full rounded-full transition-all duration-500 " + quotaBarClass(pctUsed);
+    $("#codexWeeklyPct").textContent = pctUsed > 0 ? pctUsed.toFixed(1) + "% used" : "";
+    $("#codexWeeklyReset").textContent = formatResetCountdown(data.weekly.resetAt);
+  } else {
+    $("#codexWeeklyText").textContent = "—";
+    $("#codexWeeklyFill").style.width = "0%";
+    $("#codexWeeklyPct").textContent = "";
+    $("#codexWeeklyReset").textContent = "";
+  }
+
+  $("#codexDashboard").classList.remove("hidden");
+  requestAnimationFrame(() => console.log("__resize__"));
 }
 
 // ---------------------------------------------------------------------------
