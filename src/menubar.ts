@@ -1,4 +1,4 @@
-import { app as electronApp, nativeImage } from "electron";
+import { app as electronApp, Menu, nativeImage } from "electron";
 import { menubar, Menubar } from "menubar";
 import path from "path";
 import { execSync } from "child_process";
@@ -59,6 +59,15 @@ electronApp.whenReady().then(() => {
     console.log("[menubar] ready");
     updateTrayTitle();
     refreshInterval = setInterval(updateTrayTitle, 60_000);
+
+    const contextMenu = Menu.buildFromTemplate([
+      { label: "Refresh", click: () => { updateTrayTitle(); mb.window?.webContents.reload(); } },
+      { type: "separator" },
+      { label: "Quit", click: () => electronApp.quit() },
+    ]);
+    mb.tray.on("right-click", () => {
+      mb.tray.popUpContextMenu(contextMenu);
+    });
   });
 
   mb.on("after-show", () => {
