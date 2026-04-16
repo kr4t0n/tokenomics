@@ -242,15 +242,15 @@ async function loadAll() {
     ]);
 
     const team = teamRes.ok ? await teamRes.json().catch(() => ({})) : {};
+    const usage = usageRes.ok ? await usageRes.json().catch(() => null) : null;
 
-    if (team.isTeamMember && team.pricingStrategy === "tokens") {
-      renderTeam(team);
+    if (team.isTeamMember) {
+      renderTeam(team, usage);
     } else {
-      if (!usageRes.ok) {
+      if (!usage) {
         const e = await usageRes.json().catch(() => ({}));
         throw new Error(e.error || `API error ${usageRes.status}`);
       }
-      const usage = await usageRes.json();
       const invoice = invoiceRes.ok ? await invoiceRes.json() : null;
       const hardLimit = hardLimitRes.ok ? await hardLimitRes.json() : null;
       render(usage, invoice, hardLimit);
@@ -272,27 +272,62 @@ async function loadAll() {
   }
 }
 
-function renderTeam(team) {
-  $("#sectionTitle").textContent = team.teamName || "Team";
+function renderTeam(team, usage) {
+  $("#sectionTitle").textContent = "Cursor";
 
-  // Bar 1: Included usage (subscription-covered spend)
-  $("#reqLabel").textContent = "Included Usage";
-  const includedDollars = (team.includedSpendCents || 0) / 100;
-  $("#reqText").textContent = `$${includedDollars.toFixed(2)}`;
-  $("#reqFill").style.width = "0%";
-  $("#reqFill").className = "h-full rounded-full transition-all duration-500 progress-gradient";
-  $("#reqPct").textContent = "";
+  // Token total from usage API
+  let cursorTotalTokens = 0;
+  if (usage) {
+    for (const [key, val] of Object.entries(usage)) {
+      if (key === "startOfMonth") continue;
+      if (val && typeof val === "object" && typeof val.numTokens === "number") {
+        cursorTotalTokens += val.numTokens;
+      }
+    }
+  }
+  $("#cursorTokenTotal").textContent = cursorTotalTokens > 0 ? fmtTokens(cursorTotalTokens) : "";
+
+  // Bar 1: Requests (from usage API)
+  if (usage) {
+    const gpt4 = usage["gpt-4"] || {};
+    const used = gpt4.numRequests || 0;
+    const limit = gpt4.maxRequestUsage || 0;
+    $("#reqLabel").textContent = "Requests";
+    if (limit) {
+      const pct = Math.min(100, (used / limit) * 100);
+      $("#reqText").textContent = `${used.toLocaleString()} / ${limit.toLocaleString()}`;
+      $("#reqPct").textContent = pct.toFixed(1) + "%";
+      const fill = $("#reqFill");
+      fill.style.width = pct + "%";
+      fill.className = "h-full rounded-full transition-all duration-500 " +
+        (pct > 90 ? "progress-danger" : pct > 70 ? "progress-warn" : "progress-gradient");
+    } else {
+      $("#reqText").textContent = `${used.toLocaleString()} used`;
+      $("#reqPct").textContent = "";
+      $("#reqFill").style.width = "0%";
+    }
+  } else {
+    $("#reqLabel").textContent = "Requests";
+    $("#reqText").textContent = "—";
+    $("#reqFill").style.width = "0%";
+    $("#reqPct").textContent = "";
+  }
 
   if (team.cycleEnd) {
     const end = new Date(parseInt(team.cycleEnd));
+    const daysLeft = Math.max(0, Math.ceil((end - Date.now()) / 86400000));
+    $("#reqCycle").textContent = `${daysLeft}d left`;
+  } else if (usage?.startOfMonth) {
+    const start = new Date(usage.startOfMonth);
+    const end = new Date(start); end.setMonth(end.getMonth() + 1);
     const daysLeft = Math.max(0, Math.ceil((end - Date.now()) / 86400000));
     $("#reqCycle").textContent = `${daysLeft}d left`;
   } else {
     $("#reqCycle").textContent = "";
   }
 
-  // Bar 2: Usage-based overage spend vs per-user limit
-  $("#demandLabel").textContent = "Usage-Based";
+  // Bar 2: On-demand spend vs per-user limit
+  $("#demandLabel").textContent = "On-Demand";
   const spendDollars = (team.spendCents || 0) / 100;
   const limitDollars = team.limitDollars || 0;
   $("#demandText").textContent = `$${spendDollars.toFixed(2)}`;
