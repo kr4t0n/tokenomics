@@ -35,10 +35,10 @@ tailwind.config = {
 </head>
 <body class="bg-bg text-txt text-sm font-sans leading-relaxed antialiased">
 
-<div class="px-4 pt-4 pb-4">
+<div class="px-4 pt-3 pb-3">
 
   <!-- Header -->
-  <div class="flex items-center justify-between mb-4">
+  <div class="flex items-center justify-between mb-3">
     <h1 class="text-base font-bold tracking-tight">
       <span class="text-accent">tokenomics</span>
     </h1>
@@ -111,26 +111,26 @@ tailwind.config = {
   </div>
 
   <!-- Dashboard -->
-  <div id="dashboard" class="hidden space-y-4">
+  <div id="dashboard" class="hidden space-y-1.5">
 
     <!-- Section title + token total -->
-    <div class="flex items-center justify-between">
+    <div class="flex items-center justify-between mb-0.5">
       <div id="sectionTitle" class="text-[0.65rem] font-semibold text-txt2 uppercase tracking-widest">Cursor</div>
       <span id="cursorTokenTotal" class="text-[0.6rem] text-txt2"></span>
     </div>
 
     <!-- Requests progress -->
     <div>
-      <div class="flex justify-between text-xs mb-1">
+      <div class="flex justify-between text-xs mb-0.5">
         <span class="text-txt2" id="reqLabel">Requests</span>
         <span><span class="text-txt font-semibold" id="reqText">0 / 0</span></span>
       </div>
-      <div class="h-2 bg-surface2 rounded-full overflow-hidden">
+      <div class="h-1.5 bg-surface2 rounded-full overflow-hidden">
         <div id="reqFill"
              class="h-full rounded-full transition-all duration-500 progress-gradient"
              style="width:0%"></div>
       </div>
-      <div class="flex justify-between text-[0.6rem] text-txt2 mt-1">
+      <div class="flex justify-between text-[0.6rem] text-txt2 mt-0.5">
         <span id="reqPct"></span>
         <span id="reqCycle"></span>
       </div>
@@ -138,42 +138,47 @@ tailwind.config = {
 
     <!-- On-demand progress -->
     <div>
-      <div class="flex justify-between text-xs mb-1">
+      <div class="flex justify-between text-xs mb-0.5">
         <span class="text-txt2" id="demandLabel">On-Demand</span>
         <span class="text-txt font-semibold" id="demandText">$0.00</span>
       </div>
-      <div class="h-2 bg-surface2 rounded-full overflow-hidden">
+      <div class="h-1.5 bg-surface2 rounded-full overflow-hidden">
         <div id="demandFill"
              class="h-full rounded-full transition-all duration-500 progress-gradient"
              style="width:0%"></div>
       </div>
-      <div class="flex justify-between text-[0.6rem] text-txt2 mt-1">
+      <div class="flex justify-between text-[0.6rem] text-txt2 mt-0.5">
         <span id="demandDetail"></span>
         <span id="demandLimit"></span>
       </div>
     </div>
   </div>
 
-  <!-- Codex Dashboard -->
-  <div id="codexDashboard" class="hidden space-y-4">
+  <!-- Section divider -->
+  <div id="sectionDivider" class="hidden">
+    <div class="border-t border-border my-3"></div>
+  </div>
 
-    <div class="flex items-center justify-between">
+  <!-- Codex Dashboard -->
+  <div id="codexDashboard" class="hidden space-y-1.5">
+
+    <div class="flex items-center justify-between mb-0.5">
       <div class="text-[0.65rem] font-semibold text-txt2 uppercase tracking-widest">Codex</div>
       <span id="codexTokenTotal" class="text-[0.6rem] text-txt2"></span>
     </div>
 
     <!-- 5-Hour Quota -->
     <div>
-      <div class="flex justify-between text-xs mb-1">
+      <div class="flex justify-between text-xs mb-0.5">
         <span class="text-txt2">5-Hour Quota</span>
         <span class="text-txt font-semibold" id="codex5hText">—</span>
       </div>
-      <div class="h-2 bg-surface2 rounded-full overflow-hidden">
+      <div class="h-1.5 bg-surface2 rounded-full overflow-hidden">
         <div id="codex5hFill"
              class="h-full rounded-full transition-all duration-500 progress-gradient"
              style="width:0%"></div>
       </div>
-      <div class="flex justify-between text-[0.6rem] text-txt2 mt-1">
+      <div class="flex justify-between text-[0.6rem] text-txt2 mt-0.5">
         <span id="codex5hPct"></span>
         <span id="codex5hReset"></span>
       </div>
@@ -181,16 +186,16 @@ tailwind.config = {
 
     <!-- Weekly Quota -->
     <div>
-      <div class="flex justify-between text-xs mb-1">
+      <div class="flex justify-between text-xs mb-0.5">
         <span class="text-txt2">Weekly Quota</span>
         <span class="text-txt font-semibold" id="codexWeeklyText">—</span>
       </div>
-      <div class="h-2 bg-surface2 rounded-full overflow-hidden">
+      <div class="h-1.5 bg-surface2 rounded-full overflow-hidden">
         <div id="codexWeeklyFill"
              class="h-full rounded-full transition-all duration-500 progress-gradient"
              style="width:0%"></div>
       </div>
-      <div class="flex justify-between text-[0.6rem] text-txt2 mt-1">
+      <div class="flex justify-between text-[0.6rem] text-txt2 mt-0.5">
         <span id="codexWeeklyPct"></span>
         <span id="codexWeeklyReset"></span>
       </div>
@@ -219,6 +224,7 @@ function fmtTokens(n) {
 function showError(msg) {
   $("#loading").classList.add("hidden");
   $("#dashboard").classList.add("hidden");
+  $("#sectionDivider").classList.add("hidden");
   $("#codexDashboard").classList.add("hidden");
   $("#errorState").classList.remove("hidden");
   $("#errorMsg").textContent = msg;
@@ -491,6 +497,9 @@ function renderCodex(data, tokens) {
   }
 
   $("#codexDashboard").classList.remove("hidden");
+  if (!$("#dashboard").classList.contains("hidden")) {
+    $("#sectionDivider").classList.remove("hidden");
+  }
   requestAnimationFrame(() => console.log("__resize__"));
 }
 
