@@ -6,7 +6,7 @@ Runs as a macOS menu bar app (Electron tray) or as a standalone web dashboard.
 
 ## Features
 
-- **Cursor**: request counts, on-demand spend vs. hard limit, team token-based billing
+- **Cursor**: request counts, on-demand spend vs. hard limit, on-demand token totals, team billing
 - **Codex**: 5-hour rolling quota and weekly quota (ChatGPT subscription)
 - Auto-detects credentials from local app storage — no manual setup required for most users
 - Periodic tray title updates showing current spend or token usage
@@ -95,6 +95,7 @@ tokenomics/
 | `/api/cursor/usage-based-status` | GET | Usage-based premium request status |
 | `/api/cursor/stripe-session` | GET | Stripe billing portal URL |
 | `/api/cursor/team-dashboard` | GET | Team spend and limits |
+| `/api/cursor/on-demand-tokens` | GET | On-demand token count for current billing cycle |
 | `/api/codex/usage` | GET | Codex 5-hour and weekly quota |
 | `/api/status` | GET | Token availability, sources, platforms |
 

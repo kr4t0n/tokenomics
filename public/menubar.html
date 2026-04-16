@@ -183,20 +183,23 @@ async function loadAll() {
   $("#errorState").classList.add("hidden");
 
   try {
-    const [teamRes, usageRes, invoiceRes, hardLimitRes, codexRes, codexTokensRes] = await Promise.all([
+    const [teamRes, usageRes, invoiceRes, hardLimitRes, onDemandRes, codexRes, codexTokensRes] = await Promise.all([
       fetch("/api/cursor/team-dashboard"),
       fetch("/api/cursor/usage"),
       fetch("/api/cursor/invoice"),
       fetch("/api/cursor/hard-limit"),
+      fetch("/api/cursor/on-demand-tokens"),
       fetch("/api/codex/usage"),
       fetch("/api/codex/tokens"),
     ]);
 
     const team = teamRes.ok ? await teamRes.json().catch(() => ({})) : {};
     const usage = usageRes.ok ? await usageRes.json().catch(() => null) : null;
+    const onDemand = onDemandRes.ok ? await onDemandRes.json().catch(() => ({})) : {};
+    const onDemandTokens = onDemand.onDemandTokens || 0;
 
     if (team.isTeamMember) {
-      renderTeam(team, usage);
+      renderTeam(team, usage, onDemandTokens);
     } else {
       if (!usage) {
         const e = await usageRes.json().catch(() => ({}));
@@ -223,19 +226,21 @@ async function loadAll() {
   }
 }
 
-function renderTeam(team, usage) {
+function renderTeam(team, usage, onDemandTokens = 0) {
   $("#sectionTitle").textContent = "Cursor";
 
-  // Token total from usage API
-  let cursorTotalTokens = 0;
+  // Token total: included (from usage API) + on-demand (from events API)
+  let includedTokens = 0;
   if (usage) {
     for (const [key, val] of Object.entries(usage)) {
       if (key === "startOfMonth") continue;
       if (val && typeof val === "object" && typeof val.numTokens === "number") {
-        cursorTotalTokens += val.numTokens;
+        includedTokens += val.numTokens;
       }
     }
   }
+  const cursorTotalTokens = includedTokens + onDemandTokens;
+
   $("#cursorTokenTotal").textContent = cursorTotalTokens > 0 ? fmtTokens(cursorTotalTokens) : "";
 
   // Bar 1: Requests (from usage API)
@@ -294,7 +299,7 @@ function renderTeam(team, usage) {
     $("#demandFill").style.width = "0%";
     $("#demandLimit").textContent = spendDollars === 0 ? "none" : "";
   }
-  $("#demandDetail").textContent = "";
+  $("#demandDetail").textContent = onDemandTokens > 0 ? fmtTokens(onDemandTokens) : "";
 
   $("#loading").classList.add("hidden");
   $("#dashboard").classList.remove("hidden");

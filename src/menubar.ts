@@ -98,11 +98,23 @@ async function updateTrayTitle(): Promise<void> {
       }
     }
 
-    const res = await fetch(`http://localhost:${PORT}/api/cursor/usage`);
-    if (!res.ok) return;
-    const data = (await res.json()) as CursorUsageResponse;
-    const gpt4 = data["gpt-4"] || { numTokens: 0 };
-    const tokens = (gpt4 as { numTokens: number }).numTokens || 0;
+    const [usageRes, odRes] = await Promise.all([
+      fetch(`http://localhost:${PORT}/api/cursor/usage`),
+      fetch(`http://localhost:${PORT}/api/cursor/on-demand-tokens`),
+    ]);
+    if (!usageRes.ok) return;
+    const data = (await usageRes.json()) as CursorUsageResponse;
+    let tokens = 0;
+    for (const [key, val] of Object.entries(data)) {
+      if (key === "startOfMonth") continue;
+      if (val && typeof val === "object" && typeof (val as any).numTokens === "number") {
+        tokens += (val as any).numTokens;
+      }
+    }
+    if (odRes.ok) {
+      const od = (await odRes.json()) as { onDemandTokens?: number };
+      tokens += od.onDemandTokens || 0;
+    }
     let label: string;
     if (tokens >= 1_000_000_000)
       label = (tokens / 1_000_000_000).toFixed(1) + "B";

@@ -19,6 +19,7 @@ The server can run standalone (Node) or embedded in Electron. The `export defaul
 - Token is auto-detected from Cursor's `state.vscdb` SQLite database — no manual configuration needed.
 - Auto-detection reads the `cursorAuth/accessToken` JWT, decodes the `sub` claim to extract a userId, and constructs the `WorkosCursorSessionToken` cookie format.
 - All Cursor API calls proxy to `cursor.com` with browser-like headers and cookies.
+- On-demand token counts are fetched from `cursor.com/api/dashboard/get-filtered-usage-events`, which returns per-event token breakdowns. The server sums `inputTokens + outputTokens + cacheWriteTokens + cacheReadTokens` for events where `kind == USAGE_EVENT_KIND_USAGE_BASED`, filtered client-side to the current billing cycle (the API's `startTime` parameter does not reliably filter).
 
 ### Codex
 

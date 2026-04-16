@@ -447,7 +447,7 @@ app.get("/api/status", (_req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
-// Team usage API
+// Team info resolution (shared by on-demand tokens + team-dashboard)
 // ---------------------------------------------------------------------------
 
 let _teamInfoCache: TeamInfoCache = { tokenKey: "", data: null, ts: 0 };
@@ -494,6 +494,69 @@ async function getTeamInfo(token: string): Promise<TeamInfo> {
   _teamInfoCache = { tokenKey, data: result, ts: Date.now() };
   return result;
 }
+
+// ---------------------------------------------------------------------------
+// On-demand token totals (from usage events API)
+// ---------------------------------------------------------------------------
+
+app.get("/api/cursor/on-demand-tokens", async (_req: Request, res: Response) => {
+  const token = resolveToken();
+  if (!token)
+    return res.status(401).json({ error: "No Cursor session token configured" });
+
+  try {
+    const info = await getTeamInfo(token);
+    if (!info.isTeamMember || !info.teamId) {
+      return res.json({ onDemandTokens: 0 });
+    }
+
+    const userId = token.split("%3A%3A")[0];
+    const usageData = await cursorGet("https://cursor.com/api/usage", token, {
+      user: userId,
+    });
+    const cycleStartISO = usageData.startOfMonth || new Date(
+      new Date().getFullYear(), new Date().getMonth(), 1
+    ).toISOString();
+    const cycleStartMs = new Date(cycleStartISO).getTime();
+
+    const data = await cursorPost(
+      "https://cursor.com/api/dashboard/get-filtered-usage-events",
+      token,
+      {
+        teamId: info.teamId,
+        startTime: cycleStartISO,
+        endTime: "now",
+        pageSize: 1000,
+      }
+    );
+
+    const events: any[] = data.usageEventsDisplay || [];
+    let onDemandTokens = 0;
+    for (const e of events) {
+      if (e.kind !== "USAGE_EVENT_KIND_USAGE_BASED") continue;
+      // The API doesn't reliably filter by startTime, so filter client-side
+      const ts = Number(e.timestamp);
+      const eventMs = ts > 1e12 ? ts : ts * 1000;
+      if (eventMs < cycleStartMs) continue;
+      const tu = e.tokenUsage;
+      if (!tu) continue;
+      onDemandTokens +=
+        (tu.inputTokens || 0) +
+        (tu.outputTokens || 0) +
+        (tu.cacheWriteTokens || 0) +
+        (tu.cacheReadTokens || 0);
+    }
+
+    res.json({ onDemandTokens });
+  } catch (err: any) {
+    console.error("[cursor/on-demand-tokens]", err.message);
+    res.json({ onDemandTokens: 0 });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Team usage API
+// ---------------------------------------------------------------------------
 
 app.get("/api/cursor/team-dashboard", async (_req: Request, res: Response) => {
   const token = resolveToken();
