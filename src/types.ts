@@ -1,7 +1,3 @@
-export interface Settings {
-  cursorSessionToken?: string;
-}
-
 export interface TeamInfo {
   isTeamMember: boolean;
   teamId?: number;
@@ -65,7 +61,7 @@ export interface CursorUsageResponse {
   [key: string]: CursorUsageModel | string;
 }
 
-export type TokenSource = "settings" | "local-db" | "none";
+export type TokenSource = "local-db" | "none";
 
 // ---------------------------------------------------------------------------
 // Codex

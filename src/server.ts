@@ -3,7 +3,6 @@ import path from "path";
 import fs from "fs";
 import { execSync } from "child_process";
 import type {
-  Settings,
   TeamInfo,
   TeamInfoCache,
   TeamSpendResponse,
@@ -22,35 +21,7 @@ app.use(express.static(path.join(__dirname, "..", "public")));
 app.use(express.json());
 
 // ---------------------------------------------------------------------------
-// Persistent settings (~/.tokenomics/config.json)
-// ---------------------------------------------------------------------------
-
-const SETTINGS_DIR = path.join(process.env.HOME || "", ".tokenomics");
-const SETTINGS_PATH = path.join(SETTINGS_DIR, "config.json");
-
-function readSettings(): Settings {
-  try {
-    if (fs.existsSync(SETTINGS_PATH)) {
-      return JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf-8"));
-    }
-  } catch {}
-  return {};
-}
-
-function writeSettings(settings: Settings): void {
-  if (!fs.existsSync(SETTINGS_DIR)) {
-    fs.mkdirSync(SETTINGS_DIR, { recursive: true });
-  }
-  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
-}
-
-function getTokenFromSettings(): string {
-  const s = readSettings();
-  return s.cursorSessionToken || "";
-}
-
-// ---------------------------------------------------------------------------
-// Session token resolution
+// Session token resolution (auto-detected from Cursor's local SQLite DB)
 // ---------------------------------------------------------------------------
 
 function getTokenFromDB(): string {
@@ -120,13 +91,11 @@ function getTokenFromDB(): string {
 }
 
 function resolveToken(): string {
-  return getTokenFromSettings() || getTokenFromDB();
+  return getTokenFromDB();
 }
 
 function resolveTokenSource(): TokenSource {
-  if (getTokenFromSettings()) return "settings";
-  if (getTokenFromDB()) return "local-db";
-  return "none";
+  return getTokenFromDB() ? "local-db" : "none";
 }
 
 // ---------------------------------------------------------------------------
@@ -478,38 +447,6 @@ app.get("/api/status", (_req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
-// Settings API
-// ---------------------------------------------------------------------------
-
-app.get("/api/settings", (_req: Request, res: Response) => {
-  const source = resolveTokenSource();
-  const token = resolveToken();
-  res.json({
-    tokenSource: source,
-    hasToken: !!token,
-    maskedToken: token ? token.slice(0, 8) + "..." + token.slice(-4) : "",
-  });
-});
-
-app.put("/api/settings/token", (req: Request, res: Response) => {
-  const { token } = req.body;
-  if (!token || typeof token !== "string" || !token.trim()) {
-    return res.status(400).json({ error: "Token is required" });
-  }
-  const settings = readSettings();
-  settings.cursorSessionToken = token.trim();
-  writeSettings(settings);
-  res.json({ ok: true, tokenSource: "settings" });
-});
-
-app.delete("/api/settings/token", (_req: Request, res: Response) => {
-  const settings = readSettings();
-  delete settings.cursorSessionToken;
-  writeSettings(settings);
-  res.json({ ok: true, tokenSource: resolveTokenSource() });
-});
-
-// ---------------------------------------------------------------------------
 // Team usage API
 // ---------------------------------------------------------------------------
 
@@ -603,7 +540,7 @@ if (require.main === module) {
     const codex = readCodexAuth();
     console.log(`\n  Tokenomics dashboard → http://localhost:${PORT}`);
     console.log(
-      `  Cursor token: ${token ? `found (${resolveTokenSource()})` : "⚠ not found — configure via settings panel or ensure Cursor is installed"}`
+      `  Cursor token: ${token ? "found (auto-detected)" : "⚠ not found — ensure Cursor is installed"}`
     );
     console.log(
       `  Codex auth:   ${codex ? "found (~/.codex/auth.json)" : "⚠ not found — run 'codex login' to authenticate"}`

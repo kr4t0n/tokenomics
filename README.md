@@ -54,10 +54,7 @@ npm run dist
 
 ### Cursor
 
-Token resolution (in priority order):
-
-1. **Manual token** — saved via the settings panel in the dashboard UI (stored in `~/.tokenomics/config.json`)
-2. **Auto-detected** — read from Cursor's local SQLite database (`state.vscdb`)
+Token is **auto-detected** from Cursor's local SQLite database (`state.vscdb`). No manual configuration needed — just have Cursor installed and signed in.
 
 ### Codex
 
@@ -100,8 +97,6 @@ tokenomics/
 | `/api/cursor/team-dashboard` | GET | Team spend and limits |
 | `/api/codex/usage` | GET | Codex 5-hour and weekly quota |
 | `/api/status` | GET | Token availability, sources, platforms |
-| `/api/settings` | GET | Token source and masked token |
-| `/api/settings/token` | PUT/DELETE | Save or clear manual Cursor token |
 
 ## License
 

@@ -16,7 +16,7 @@ The server can run standalone (Node) or embedded in Electron. The `export defaul
 
 ### Cursor
 
-- Token source priority: manual setting (`~/.tokenomics/config.json`) > auto-detect from Cursor's `state.vscdb` SQLite database.
+- Token is auto-detected from Cursor's `state.vscdb` SQLite database — no manual configuration needed.
 - Auto-detection reads the `cursorAuth/accessToken` JWT, decodes the `sub` claim to extract a userId, and constructs the `WorkosCursorSessionToken` cookie format.
 - All Cursor API calls proxy to `cursor.com` with browser-like headers and cookies.
 
