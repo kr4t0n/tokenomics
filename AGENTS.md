@@ -17,9 +17,10 @@ The app has four layers:
    it to a fixed port (47836), wraps the dashboard in a macOS tray window,
    and applies the saved auto-start preference on launch.
 4. **Dashboard UI** (`public/menubar.html`) — single HTML file with inline
-   Tailwind CSS (CDN) and vanilla JavaScript. Calls the local API routes,
-   renders usage bars, exposes a settings panel (gear ⚙) for start-at-login
-   and version checks, and shows an update banner when a newer release exists.
+   Tailwind CSS (CDN) and vanilla JavaScript. Calls the local API routes
+   and renders usage bars only. **All settings and lifecycle controls live
+   in the right-click tray menu** (built dynamically in `menubar.ts`); the
+   popover has no gear button or settings panel.
 
 The server can run standalone (Node) or embedded in Electron. The
 `export default app` / `require.main === module` pattern enables both modes.
@@ -47,9 +48,14 @@ Apple Developer / Gatekeeper / notarization entirely:
 
 `POST /api/update/install` (and `tokenomics update` on the CLI) shells out to
 `npm install -g github:<repo> --force`. The repo slug is derived from
-`package.json#repository`, falling back to `kr4t0n/tokenomics`. The popover
-UI shows a banner whenever `GET /api/update/check` reports
-`updateAvailable: true`.
+`package.json#repository`, falling back to `kr4t0n/tokenomics`.
+
+`menubar.ts` polls `GET /api/update/check` on launch and every six hours,
+caching the latest result in module-level state. The right-click tray menu
+reads that state when it is opened: it shows **Check for updates** when no
+update is known, **Install update vX.Y.Z** when one is available, and a
+disabled **Installing update…** while a fetch is in flight. macOS
+`Notification` is used for both "update available" and post-install status.
 
 ### Auto-start at login
 
@@ -113,7 +119,16 @@ users can toggle the login item without opening the UI.
 - **Magic console-message IPC**: the popover uses `console.log("__resize__")`
   to ask the main process to resize the window to its content. The Electron
   main process listens for this on `web-contents-created`. Keep this
-  contract in sync if either side is refactored.
+  contract in sync if either side is refactored. (The `__quit__` channel was
+  removed when settings moved to the right-click menu — quit is now native.)
+- **Right-click tray menu owns ALL settings**: version label, refresh,
+  start-at-login checkbox, update check/install, GitHub link, and quit are
+  all built dynamically by `buildContextMenu()` in `menubar.ts`. Do NOT
+  reintroduce gear/quit buttons in `menubar.html` — that creates two sources
+  of truth and was deliberately removed.
+- **Update notifications**: `refreshUpdateState()` runs on launch and every
+  6 hours. `checkUpdateAndNotify()` always notifies (used by the menu);
+  the background poll only notifies when the latest version changes.
 - **Detached child by default**: `bin/tokenomics.js` spawns Electron with
   `detached: true` + `child.unref()` and pipes stdio to
   `~/.tokenomics/tokenomics.log`. A short `setTimeout` keeps the parent alive

@@ -14,7 +14,8 @@ standalone web dashboard.
 - Auto-detects credentials from local app storage — no manual setup required for most users
 - Periodic tray title updates showing current spend or token usage
 - Built-in **auto-start at login** toggle (macOS login items)
-- Built-in **self-update** from GitHub (`tokenomics update` or in-app button)
+- Built-in **self-update** from GitHub (`tokenomics update` or right-click menu)
+- Right-click menu for refresh, start-at-login toggle, update check/install, and quit
 
 ## Prerequisites
 
@@ -62,9 +63,17 @@ tokenomics            # same as `tokenomics start`
 Launches the Electron tray app. The API server listens on port **47836** and
 the dashboard is served at `http://localhost:47836/menubar.html`.
 
-Click the menu bar icon to open the popover. Use the gear (⚙) inside the
-popover for settings (start at login, version check). Right-click the icon for
-the standard system menu (Refresh, Quit).
+Click the menu bar icon to open the popover and view your usage. **Right-click**
+the icon for all settings and lifecycle actions:
+
+- **Refresh** — re-fetch usage data and reload the popover
+- **Start at login** — toggle the macOS login item
+- **Check for updates** / **Install update vX.Y.Z** — query GitHub and run
+  `npm install -g github:<repo> --force` from inside the app
+- **Open repository on GitHub**
+- **Quit**
+
+Update results are also surfaced via native macOS notifications.
 
 ### Background by default
 
@@ -104,15 +113,18 @@ tokenomics update
 tokenomics restart   # pick up the new version
 ```
 
-…or open the popover, click ⚙, and use the **Check** button. If an update is
-available a banner appears at the top of the popover with an **Update** button.
-After installing, run `tokenomics restart` (or quit and relaunch) to load the
-new version.
+…or right-click the menu bar icon and pick **Check for updates**. When a new
+version exists, the menu shows **Install update vX.Y.Z**; selecting it runs
+`npm install -g github:<repo> --force` and notifies you when finished. Then
+quit from the same menu and relaunch (or run `tokenomics restart`).
+
+The app also polls for updates in the background every six hours and posts
+a macOS notification when a newer version is available.
 
 ### Auto-start at login
 
-Toggle "Start at login" inside the popover settings (⚙). You can also
-control it from the CLI:
+Toggle **Start at login** in the right-click menu. You can also control it
+from the CLI:
 
 ```bash
 tokenomics --enable-autostart

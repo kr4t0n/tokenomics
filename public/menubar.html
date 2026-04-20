@@ -31,8 +31,6 @@ tailwind.config = {
   .progress-gradient { background: linear-gradient(90deg, #6c8cff, #4ecdc4); }
   .progress-warn     { background: linear-gradient(90deg, #f7b955, #e89b2d); }
   .progress-danger   { background: linear-gradient(90deg, #ff6b6b, #e04a4a); }
-  .switch input:checked + .switch-track { background-color: #6c8cff; }
-  .switch input:checked + .switch-track .switch-knob { transform: translateX(14px); }
 </style>
 </head>
 <body class="bg-bg text-txt text-sm font-sans leading-relaxed antialiased">
@@ -48,25 +46,7 @@ tailwind.config = {
       <span id="statusDot" class="w-2 h-2 rounded-full bg-accent2"></span>
       <button onclick="loadAll()"
               class="text-txt2 hover:text-txt text-xs transition">Refresh</button>
-      <button onclick="toggleSettings()"
-              class="text-txt2 hover:text-txt text-xs transition"
-              title="Settings">⚙</button>
     </div>
-  </div>
-
-  <!-- Update banner (hidden by default) -->
-  <div id="updateBanner" class="hidden mb-3 rounded-lg bg-surface border border-border px-3 py-2">
-    <div class="flex items-center justify-between gap-2">
-      <div class="text-xs">
-        <div class="font-semibold text-accent2">Update available</div>
-        <div class="text-txt2" id="updateBannerInfo"></div>
-      </div>
-      <button id="updateBannerBtn" onclick="installUpdate()"
-              class="text-[0.7rem] bg-accent hover:opacity-90 text-white px-2 py-1 rounded transition">
-        Update
-      </button>
-    </div>
-    <div id="updateProgress" class="hidden mt-2 text-[0.65rem] text-txt2">Installing…</div>
   </div>
 
   <!-- Loading -->
@@ -174,35 +154,6 @@ tailwind.config = {
     </div>
   </div>
 
-  <!-- Settings panel (hidden by default) -->
-  <div id="settingsPanel" class="hidden mt-3 pt-3 border-t border-border space-y-2">
-    <div class="flex items-center justify-between">
-      <div>
-        <div class="text-xs font-semibold">Start at login</div>
-        <div class="text-[0.65rem] text-txt2">Launch tokenomics when you sign in</div>
-      </div>
-      <label class="switch relative inline-flex items-center cursor-pointer">
-        <input id="autoStartToggle" type="checkbox" class="sr-only" onchange="setAutoStart(this.checked)" />
-        <span class="switch-track w-8 h-4 bg-surface2 rounded-full transition relative">
-          <span class="switch-knob absolute left-0.5 top-0.5 w-3 h-3 bg-white rounded-full transition"></span>
-        </span>
-      </label>
-    </div>
-    <div class="flex items-center justify-between">
-      <div>
-        <div class="text-xs font-semibold">Version</div>
-        <div class="text-[0.65rem] text-txt2" id="versionInfo">…</div>
-      </div>
-      <button onclick="checkUpdate()"
-              class="text-[0.7rem] text-accent hover:opacity-80 transition">
-        Check
-      </button>
-    </div>
-    <div class="text-[0.6rem] text-txt2 pt-1 leading-snug">
-      Tip: right-click the menu bar icon to refresh or quit.
-    </div>
-  </div>
-
 </div>
 
 <script>
@@ -213,10 +164,6 @@ function fmtTokens(n) {
   if (n >= 1e6) return (n / 1e6).toFixed(1) + "M tokens";
   if (n >= 1e3) return (n / 1e3).toFixed(1) + "K tokens";
   return n.toLocaleString() + " tokens";
-}
-
-function notifyResize() {
-  requestAnimationFrame(() => console.log("__resize__"));
 }
 
 function showError(msg) {
@@ -273,11 +220,9 @@ async function loadAll() {
     }
 
     $("#statusDot").className = "w-2 h-2 rounded-full bg-accent2";
-    notifyResize();
   } catch (err) {
     console.error(err);
     showError(err.message);
-    notifyResize();
   }
 }
 
@@ -361,10 +306,12 @@ function renderTeam(team, usage, onDemandTokens = 0) {
 }
 
 function render(usage, invoice, hardLimit) {
+  // Reset labels for individual view
   $("#sectionTitle").textContent = "Cursor";
   $("#reqLabel").textContent = "Requests";
   $("#demandLabel").textContent = "On-Demand";
 
+  // Total tokens across all models
   let cursorTotalTokens = 0;
   for (const [key, val] of Object.entries(usage)) {
     if (key === "startOfMonth") continue;
@@ -379,6 +326,7 @@ function render(usage, invoice, hardLimit) {
   const limit = gpt4.maxRequestUsage || 0;
   const startOfMonth = usage.startOfMonth;
 
+  // Requests bar
   if (limit) {
     const pct = Math.min(100, (used / limit) * 100);
     $("#reqText").textContent = `${used.toLocaleString()} / ${limit.toLocaleString()}`;
@@ -400,6 +348,7 @@ function render(usage, invoice, hardLimit) {
     $("#reqCycle").textContent = `${daysLeft}d left`;
   }
 
+  // On-demand bar
   let totalCents = 0;
   let totalReqs = 0;
   if (invoice?.items) {
@@ -460,6 +409,7 @@ function quotaBarClass(pctUsed) {
 }
 
 function renderCodex(data, tokens) {
+  // Token total
   if (tokens && tokens.totalTokens > 0) {
     $("#codexTokenTotal").textContent = fmtTokens(tokens.totalTokens);
   } else {
@@ -503,107 +453,12 @@ function renderCodex(data, tokens) {
   notifyResize();
 }
 
-// ---------------------------------------------------------------------------
-// Settings + self-update
-// ---------------------------------------------------------------------------
-
-function toggleSettings() {
-  const panel = $("#settingsPanel");
-  const wasHidden = panel.classList.contains("hidden");
-  panel.classList.toggle("hidden");
-  if (wasHidden) loadSettings();
-  notifyResize();
+// Magic console message the Electron host listens for to fit the popover
+// height to the rendered content.
+function notifyResize() {
+  requestAnimationFrame(() => console.log("__resize__"));
 }
 
-async function loadSettings() {
-  try {
-    const [statusRes, autoRes, updateRes] = await Promise.all([
-      fetch("/api/status"),
-      fetch("/api/autostart"),
-      fetch("/api/update/check"),
-    ]);
-    const status = statusRes.ok ? await statusRes.json() : {};
-    const auto = autoRes.ok ? await autoRes.json() : { enabled: false, supported: false };
-    const update = updateRes.ok ? await updateRes.json() : null;
-
-    const versionLine = update && !update.error
-      ? (update.updateAvailable
-          ? `v${status.version || update.current} → v${update.latest}`
-          : `v${status.version || update.current} (latest)`)
-      : `v${status.version || "?"}`;
-    $("#versionInfo").textContent = versionLine;
-
-    const toggle = $("#autoStartToggle");
-    toggle.checked = !!auto.enabled;
-    toggle.disabled = !auto.supported;
-  } catch (err) {
-    console.error(err);
-  }
-}
-
-async function setAutoStart(enabled) {
-  try {
-    const res = await fetch("/api/autostart", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled }),
-    });
-    if (!res.ok) {
-      const e = await res.json().catch(() => ({}));
-      throw new Error(e.error || `HTTP ${res.status}`);
-    }
-  } catch (err) {
-    console.error(err);
-    $("#autoStartToggle").checked = !enabled;
-  }
-}
-
-async function checkUpdate(opts = {}) {
-  try {
-    const res = await fetch("/api/update/check");
-    if (!res.ok) return;
-    const data = await res.json();
-    const banner = $("#updateBanner");
-    const info = $("#updateBannerInfo");
-    if (data && data.updateAvailable) {
-      info.textContent = `v${data.current} → v${data.latest}`;
-      banner.classList.remove("hidden");
-    } else if (!opts.silent) {
-      banner.classList.add("hidden");
-    }
-    notifyResize();
-  } catch (err) {
-    console.error(err);
-  }
-}
-
-async function installUpdate() {
-  const btn = $("#updateBannerBtn");
-  const progress = $("#updateProgress");
-  btn.disabled = true;
-  btn.textContent = "Installing…";
-  progress.classList.remove("hidden");
-  progress.textContent = "Installing…";
-  try {
-    const res = await fetch("/api/update/install", { method: "POST" });
-    const data = await res.json().catch(() => ({}));
-    if (data && data.ok) {
-      progress.textContent = "Update installed. Quit & relaunch to use the new version.";
-      btn.textContent = "Updated";
-    } else {
-      progress.textContent = `Update failed: ${data?.error || "unknown error"}`;
-      btn.disabled = false;
-      btn.textContent = "Retry";
-    }
-  } catch (err) {
-    progress.textContent = `Update failed: ${err.message}`;
-    btn.disabled = false;
-    btn.textContent = "Retry";
-  }
-  notifyResize();
-}
-
-checkUpdate({ silent: true });
 loadAll();
 </script>
 </body>
