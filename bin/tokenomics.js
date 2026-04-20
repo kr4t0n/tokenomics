@@ -9,11 +9,16 @@
  * notarization. The Electron binary inside node_modules is already
  * signed by the Electron team, so macOS trusts it when launched as a
  * child process of the terminal.
+ *
+ * `tokenomics` (or `tokenomics start`) detaches Electron from the parent
+ * shell by default so closing the terminal does not kill the menubar app.
+ * Use `--foreground` / `-f` to keep it attached for debugging.
  */
 
-const { spawn, spawnSync } = require("child_process");
+const { spawn, spawnSync, execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const http = require("http");
 const https = require("https");
 
 const PKG_ROOT = path.resolve(__dirname, "..");
@@ -21,6 +26,10 @@ const PKG_JSON = require(path.join(PKG_ROOT, "package.json"));
 const REPO_SLUG =
   (PKG_JSON.repository && extractGithubSlug(PKG_JSON.repository)) ||
   "kr4t0n/tokenomics";
+
+const APP_PORT = 47836;
+const APP_DIR = path.join(process.env.HOME || "", ".tokenomics");
+const LOG_FILE = path.join(APP_DIR, "tokenomics.log");
 
 function extractGithubSlug(repo) {
   const url = typeof repo === "string" ? repo : repo.url || "";
@@ -32,16 +41,24 @@ function printHelp() {
   console.log(`tokenomics v${PKG_JSON.version}
 
 Usage:
-  tokenomics                Launch the menubar app (default).
-  tokenomics start          Same as above.
-  tokenomics update         Pull and install the latest version from GitHub.
-  tokenomics check          Check whether a newer version is available.
-  tokenomics version        Print the installed version.
-  tokenomics --help, -h     Show this help.
+  tokenomics                 Start the menubar app in the background (default).
+  tokenomics start [-f]      Same. Pass --foreground / -f to keep it attached.
+  tokenomics stop            Stop the running menubar app.
+  tokenomics restart         Stop then start (useful after \`tokenomics update\`).
+  tokenomics logs            Tail the menubar app's log file.
+  tokenomics check           Check whether a newer version is on GitHub.
+  tokenomics update          Pull and install the latest version from GitHub.
+  tokenomics version         Print the installed version.
+  tokenomics --help, -h      Show this help.
 
-Repository: https://github.com/${REPO_SLUG}
+Logs:        ${LOG_FILE}
+Repository:  https://github.com/${REPO_SLUG}
 `);
 }
+
+// ---------------------------------------------------------------------------
+// Update check
+// ---------------------------------------------------------------------------
 
 function fetchJson(url) {
   return new Promise((resolve, reject) => {
@@ -55,7 +72,12 @@ function fetchJson(url) {
           },
         },
         (res) => {
-          if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          if (
+            res.statusCode &&
+            res.statusCode >= 300 &&
+            res.statusCode < 400 &&
+            res.headers.location
+          ) {
             fetchJson(res.headers.location).then(resolve, reject);
             return;
           }
@@ -110,10 +132,8 @@ async function cmdCheck() {
       console.log(
         `Update available: ${r.current} → ${r.latest}\nRun \`tokenomics update\` to install.`
       );
-      process.exit(0);
     } else {
       console.log(`tokenomics is up to date (v${r.current}).`);
-      process.exit(0);
     }
   } catch (err) {
     console.error(`Failed to check for updates: ${err.message}`);
@@ -135,31 +155,156 @@ function cmdUpdate() {
     );
     process.exit(result.status ?? 1);
   }
-  console.log("\nUpdate installed. Relaunch tokenomics to use the new version.");
+  console.log(
+    "\nUpdate installed. Run `tokenomics restart` to use the new version."
+  );
 }
 
-function cmdStart() {
+// ---------------------------------------------------------------------------
+// start / stop / restart / logs
+// ---------------------------------------------------------------------------
+
+function isAlreadyRunning() {
+  return new Promise((resolve) => {
+    const req = http.get(
+      { host: "127.0.0.1", port: APP_PORT, path: "/api/status", timeout: 500 },
+      (res) => {
+        resolve(res.statusCode === 200);
+        res.resume();
+      }
+    );
+    req.on("error", () => resolve(false));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
+
+function getRunningPids() {
+  try {
+    const out = execSync(`lsof -ti:${APP_PORT}`, {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return out ? out.split("\n").map((s) => parseInt(s, 10)) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function cmdStart(args) {
+  const foreground = args.includes("--foreground") || args.includes("-f");
   const electronBinary = require("electron");
   const entry = path.join(PKG_ROOT, "dist", "menubar.js");
+
   if (!fs.existsSync(entry)) {
     console.error(
       `Could not find ${entry}. Did you run \`npm run build\` (or install via npm)?`
     );
     process.exit(1);
   }
-  const child = spawn(electronBinary, [entry, ...process.argv.slice(3)], {
-    stdio: "inherit",
-    detached: false,
+
+  if (await isAlreadyRunning()) {
+    console.log(
+      "tokenomics is already running. Click the menu bar icon, or run `tokenomics stop` to terminate."
+    );
+    return;
+  }
+
+  // Forward any non-flag args (e.g. --enable-autostart) to Electron.
+  const passthrough = args.filter((a) => a !== "--foreground" && a !== "-f");
+
+  if (foreground) {
+    const child = spawn(electronBinary, [entry, ...passthrough], {
+      stdio: "inherit",
+      env: process.env,
+    });
+    child.on("close", (code) => process.exit(code ?? 0));
+    child.on("error", (err) => {
+      console.error(`Failed to launch Electron: ${err.message}`);
+      process.exit(1);
+    });
+    return;
+  }
+
+  // Detached: fully decouple from the parent shell so closing the terminal
+  // (or the user logging out) does not kill the menubar app.
+  fs.mkdirSync(APP_DIR, { recursive: true });
+  const out = fs.openSync(LOG_FILE, "a");
+  const err = fs.openSync(LOG_FILE, "a");
+
+  const child = spawn(electronBinary, [entry, ...passthrough], {
+    stdio: ["ignore", out, err],
+    detached: true,
     env: process.env,
   });
-  child.on("close", (code) => process.exit(code ?? 0));
-  child.on("error", (err) => {
-    console.error(`Failed to launch Electron: ${err.message}`);
+
+  let spawnFailed = false;
+  child.on("error", (e) => {
+    spawnFailed = true;
+    console.error(`Failed to launch Electron: ${e.message}`);
     process.exit(1);
+  });
+
+  // Give Electron a moment to fail synchronously (e.g. binary missing) before
+  // we detach. If it survives 200ms we consider the spawn successful.
+  setTimeout(() => {
+    if (spawnFailed) return;
+    child.unref();
+    console.log(`tokenomics started in the background (pid ${child.pid}).`);
+    console.log(`  Logs:  ${LOG_FILE}`);
+    console.log(`  Stop:  tokenomics stop`);
+    process.exit(0);
+  }, 200);
+}
+
+function cmdStop() {
+  const pids = getRunningPids();
+  if (!pids.length) {
+    console.log("tokenomics is not running.");
+    return;
+  }
+  for (const pid of pids) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch (e) {
+      console.error(`Failed to stop pid ${pid}: ${e.message}`);
+    }
+  }
+  console.log(`Stopped tokenomics (pid ${pids.join(", ")}).`);
+}
+
+async function cmdRestart(args) {
+  cmdStop();
+  // Brief pause so the OS releases the port before we try to bind it again.
+  await new Promise((r) => setTimeout(r, 500));
+  await cmdStart(args.filter((a) => a !== "restart"));
+}
+
+function cmdLogs() {
+  if (!fs.existsSync(LOG_FILE)) {
+    console.log("No logs yet — start tokenomics first.");
+    return;
+  }
+  const child = spawn("tail", ["-n", "50", "-f", LOG_FILE], {
+    stdio: "inherit",
+  });
+  const exit = (code) => process.exit(code ?? 0);
+  child.on("close", exit);
+  process.on("SIGINT", () => {
+    child.kill("SIGINT");
+    exit(0);
   });
 }
 
+// ---------------------------------------------------------------------------
+// Dispatch
+// ---------------------------------------------------------------------------
+
 const cmd = (process.argv[2] || "start").toLowerCase();
+const rest = process.argv.slice(3);
+
 switch (cmd) {
   case "-h":
   case "--help":
@@ -178,10 +323,24 @@ switch (cmd) {
     cmdUpdate();
     break;
   case "start":
-    cmdStart();
+    cmdStart(rest);
+    break;
+  case "stop":
+    cmdStop();
+    break;
+  case "restart":
+    cmdRestart(rest);
+    break;
+  case "logs":
+    cmdLogs();
     break;
   default:
-    console.error(`Unknown command: ${cmd}\n`);
-    printHelp();
-    process.exit(1);
+    // Allow `tokenomics --foreground` (no subcommand) to act as `start -f`.
+    if (cmd.startsWith("-")) {
+      cmdStart([cmd, ...rest]);
+    } else {
+      console.error(`Unknown command: ${cmd}\n`);
+      printHelp();
+      process.exit(1);
+    }
 }

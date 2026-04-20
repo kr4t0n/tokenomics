@@ -66,11 +66,30 @@ Click the menu bar icon to open the popover. Use the gear (⚙) inside the
 popover for settings (start at login, version check). Right-click the icon for
 the standard system menu (Refresh, Quit).
 
+### Background by default
+
+`tokenomics start` (and the bare `tokenomics` invocation) detaches the
+Electron process from the terminal so closing the shell does not kill the
+menubar app. Its output is redirected to `~/.tokenomics/tokenomics.log`.
+
+If the app is already running, `start` is a no-op (it probes
+`http://localhost:47836/api/status` first).
+
+To debug or watch logs live, run in the foreground:
+
+```bash
+tokenomics start --foreground   # or: tokenomics start -f
+```
+
 ### Subcommands
 
 | Command | Description |
 |---------|-------------|
-| `tokenomics` / `tokenomics start` | Launch the menubar app |
+| `tokenomics` / `tokenomics start` | Launch the menubar app in the background |
+| `tokenomics start -f` / `--foreground` | Launch attached to the terminal |
+| `tokenomics stop` | Stop the running menubar app |
+| `tokenomics restart` | Stop and relaunch the menubar app |
+| `tokenomics logs` | Tail `~/.tokenomics/tokenomics.log` |
 | `tokenomics check` | Check whether a newer version exists on GitHub |
 | `tokenomics update` | Pull and install the latest version from GitHub |
 | `tokenomics version` | Print the installed version |
@@ -82,10 +101,13 @@ Either run:
 
 ```bash
 tokenomics update
+tokenomics restart   # pick up the new version
 ```
 
 …or open the popover, click ⚙, and use the **Check** button. If an update is
 available a banner appears at the top of the popover with an **Update** button.
+After installing, run `tokenomics restart` (or quit and relaunch) to load the
+new version.
 
 ### Auto-start at login
 

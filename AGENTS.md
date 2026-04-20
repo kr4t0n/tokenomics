@@ -114,3 +114,16 @@ users can toggle the login item without opening the UI.
   to ask the main process to resize the window to its content. The Electron
   main process listens for this on `web-contents-created`. Keep this
   contract in sync if either side is refactored.
+- **Detached child by default**: `bin/tokenomics.js` spawns Electron with
+  `detached: true` + `child.unref()` and pipes stdio to
+  `~/.tokenomics/tokenomics.log`. A short `setTimeout` keeps the parent alive
+  briefly so synchronous spawn errors are still surfaced before the parent
+  exits. Use `--foreground` (or `-f`) for live logs.
+- **Single-instance check via HTTP**: `tokenomics start` probes
+  `http://localhost:47836/api/status` before spawning Electron. If the probe
+  succeeds, the start command is a no-op and the existing instance keeps
+  running. This complements Electron's `requestSingleInstanceLock()`.
+- **`stop`/`restart` use port-based PID lookup**: the CLI runs
+  `lsof -ti:47836` to find the running Electron process and sends `SIGTERM`.
+  If a stale process holds the port without serving HTTP, `stop` is the
+  recovery path.
