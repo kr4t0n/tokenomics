@@ -84,3 +84,27 @@ export interface CodexAuth {
 }
 
 export type CodexTokenSource = "codex-auth" | "none";
+
+// ---------------------------------------------------------------------------
+// App lifecycle (update + auto-start)
+// ---------------------------------------------------------------------------
+
+export interface UpdateCheckResponse {
+  current: string;
+  latest: string | null;
+  updateAvailable: boolean;
+  repo: string;
+  error?: string;
+}
+
+export interface UpdateInstallResponse {
+  ok: boolean;
+  output: string;
+  exitCode: number | null;
+  error?: string;
+}
+
+export interface AutoStartResponse {
+  enabled: boolean;
+  supported: boolean;
+}

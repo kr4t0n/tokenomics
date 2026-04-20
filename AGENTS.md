@@ -4,13 +4,62 @@ High-level context for AI agents working on this codebase.
 
 ## Architecture
 
-The app has three layers:
+The app has four layers:
 
-1. **Express API server** (`src/server.ts`) — the core. Resolves auth tokens, proxies external APIs, and serves the dashboard UI as static files.
-2. **Electron menubar** (`src/menubar.ts`) — imports the Express app, binds it to a fixed port (47836), and wraps the dashboard in a macOS tray window.
-3. **Dashboard UI** (`public/menubar.html`) — single HTML file with inline Tailwind CSS (CDN) and vanilla JavaScript. Calls the local API routes and renders usage bars.
+1. **CLI wrapper** (`bin/tokenomics.js`) — tiny Node.js script registered as
+   the package's `bin`. It is the entry point users run from a terminal. It
+   either spawns Electron with the compiled `dist/menubar.js` or executes a
+   subcommand (`update`, `check`, `version`, `--help`).
+2. **Express API server** (`src/server.ts`) — the core. Resolves auth tokens,
+   proxies external APIs, serves the dashboard UI as static files, and exposes
+   app-lifecycle routes (`/api/update/*`, `/api/autostart`).
+3. **Electron menubar** (`src/menubar.ts`) — imports the Express app, binds
+   it to a fixed port (47836), wraps the dashboard in a macOS tray window,
+   and applies the saved auto-start preference on launch.
+4. **Dashboard UI** (`public/menubar.html`) — single HTML file with inline
+   Tailwind CSS (CDN) and vanilla JavaScript. Calls the local API routes,
+   renders usage bars, exposes a settings panel (gear ⚙) for start-at-login
+   and version checks, and shows an update banner when a newer release exists.
 
-The server can run standalone (Node) or embedded in Electron. The `export default app` / `require.main === module` pattern enables both modes.
+The server can run standalone (Node) or embedded in Electron. The
+`export default app` / `require.main === module` pattern enables both modes.
+Electron-only code paths in `server.ts` are guarded by an `IS_ELECTRON` check
+(`process.versions.electron`) so the standalone Node entry never tries to
+import `electron`.
+
+## Distribution Model
+
+Shipped as an **npm CLI** rather than a packaged `.app`. This avoids
+Apple Developer / Gatekeeper / notarization entirely:
+
+- `npm install -g github:kr4t0n/tokenomics` installs the package globally,
+  drops a `tokenomics` shim into the npm bin path, and runs the
+  `postinstall` script (`tsc || true`) to compile TypeScript to `dist/`.
+- `electron` and `typescript` are listed in **`dependencies`** (not
+  `devDependencies`) because they are needed at runtime in a fresh global
+  install.
+- When the user runs `tokenomics`, the CLI launches Electron from
+  `node_modules`. Because the Electron binary is signed by the Electron team
+  and is being launched as a child of the user's terminal, macOS treats it as
+  a trusted invocation — no Developer ID required.
+
+### Self-update flow
+
+`POST /api/update/install` (and `tokenomics update` on the CLI) shells out to
+`npm install -g github:<repo> --force`. The repo slug is derived from
+`package.json#repository`, falling back to `kr4t0n/tokenomics`. The popover
+UI shows a banner whenever `GET /api/update/check` reports
+`updateAvailable: true`.
+
+### Auto-start at login
+
+`src/config.ts` wraps Electron's `app.setLoginItemSettings()` and persists
+the user's choice to `~/.tokenomics/config.json` (`{ "autoStart": bool }`).
+`src/menubar.ts` re-applies the saved preference on every launch so the
+login item stays in sync if the user re-installs or moves the binary.
+
+The CLI also accepts `--enable-autostart` / `--disable-autostart` flags so
+users can toggle the login item without opening the UI.
 
 ## Platform Integration
 
@@ -31,6 +80,8 @@ The server can run standalone (Node) or embedded in Electron. The `export defaul
 
 ## Key Design Decisions
 
+- **CLI distribution over `.dmg`** — sidesteps the entire Apple notarization
+  pipeline. Trade-off: users need Node.js installed.
 - **Single HTML file for UI** — keeps packaging simple for Electron and avoids a build step for the frontend. Tailwind is loaded from CDN.
 - **CommonJS modules** — required for Electron compatibility with the `menubar` package.
 - **No manual token input for Codex** — the ChatGPT auth flow is browser-based and produces a JWT that auto-refreshes. Pasting tokens manually would be fragile.
@@ -40,7 +91,7 @@ The server can run standalone (Node) or embedded in Electron. The `export defaul
 ## Conventions
 
 - TypeScript strict mode, ES2022 target, CommonJS output.
-- All API routes follow the pattern `/api/<platform>/<resource>`.
+- All API routes follow the pattern `/api/<platform>/<resource>` (or `/api/<feature>` for app-lifecycle routes).
 - Error responses use `{ error: string }` with appropriate HTTP status codes (401 for missing auth, 502 for upstream failures).
 - Shared types live in `src/types.ts`.
 
@@ -50,3 +101,16 @@ The server can run standalone (Node) or embedded in Electron. The `export defaul
 - Port 47836 is hardcoded in `menubar.ts`. The standalone server uses `PORT` env var (default 3000).
 - `better-sqlite3` is a native module — if it fails to load (e.g., architecture mismatch), the server falls back to the `sqlite3` CLI binary.
 - The Electron app kills anything on port 47836 at startup (`lsof -ti:PORT | xargs kill -9`).
+- **`npm install -g` paths**: under nvm the global bin is per-version, so the
+  user may need to re-run install after switching Node versions.
+- **Login item registration** uses the absolute path of the `tokenomics`
+  shim. If the user moves/reinstalls the package, the registration is
+  refreshed automatically on next launch via `applyLoginItem(cfg.autoStart)`.
+- **`process.versions.electron` guard**: any code that imports from
+  `electron` must be lazy-required behind an `IS_ELECTRON` check, otherwise
+  the standalone Node mode will crash trying to load Electron's native
+  bindings.
+- **Magic console-message IPC**: the popover uses `console.log("__resize__")`
+  to ask the main process to resize the window to its content. The Electron
+  main process listens for this on `web-contents-created`. Keep this
+  contract in sync if either side is refactored.

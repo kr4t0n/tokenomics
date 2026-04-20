@@ -1,7 +1,8 @@
 import express, { Request, Response } from "express";
 import path from "path";
 import fs from "fs";
-import { execSync } from "child_process";
+import https from "https";
+import { execSync, spawn } from "child_process";
 import type {
   TeamInfo,
   TeamInfoCache,
@@ -12,6 +13,9 @@ import type {
   CodexQuotaWindow,
   CodexUsageResponse,
   CodexTokenSource,
+  UpdateCheckResponse,
+  UpdateInstallResponse,
+  AutoStartResponse,
 } from "./types";
 
 const app = express();
@@ -591,6 +595,176 @@ app.get("/api/cursor/team-dashboard", async (_req: Request, res: Response) => {
     console.error("[cursor/team-dashboard]", err.message);
     res.json({ isTeamMember: false } as TeamDashboardResponse);
   }
+});
+
+// ---------------------------------------------------------------------------
+// App lifecycle: update check / install + auto-start toggle
+// ---------------------------------------------------------------------------
+
+const PKG_JSON_PATH = path.join(__dirname, "..", "package.json");
+const PKG_JSON: { version: string; repository?: { url?: string } | string } =
+  JSON.parse(fs.readFileSync(PKG_JSON_PATH, "utf-8"));
+
+function repoSlug(): string {
+  const repo: any = PKG_JSON.repository;
+  const url = typeof repo === "string" ? repo : repo?.url || "";
+  const m = url.match(/github\.com[:/]([^/]+\/[^/.]+)(?:\.git)?/);
+  return m ? m[1] : "kr4t0n/tokenomics";
+}
+
+function compareSemver(a: string, b: string): number {
+  const pa = a.split(/[.-]/).map((x) => (isNaN(+x) ? x : +x));
+  const pb = b.split(/[.-]/).map((x) => (isNaN(+x) ? x : +x));
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = (pa[i] ?? 0) as number;
+    const y = (pb[i] ?? 0) as number;
+    if (x < y) return -1;
+    if (x > y) return 1;
+  }
+  return 0;
+}
+
+function fetchJson(url: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    https
+      .get(
+        url,
+        {
+          headers: {
+            "User-Agent": `tokenomics/${PKG_JSON.version}`,
+            Accept: "application/json",
+          },
+        },
+        (res) => {
+          if (
+            res.statusCode &&
+            res.statusCode >= 300 &&
+            res.statusCode < 400 &&
+            res.headers.location
+          ) {
+            fetchJson(res.headers.location).then(resolve, reject);
+            return;
+          }
+          if (res.statusCode !== 200) {
+            reject(new Error(`HTTP ${res.statusCode} for ${url}`));
+            res.resume();
+            return;
+          }
+          let body = "";
+          res.setEncoding("utf-8");
+          res.on("data", (c) => (body += c));
+          res.on("end", () => {
+            try {
+              resolve(JSON.parse(body));
+            } catch (e) {
+              reject(e as Error);
+            }
+          });
+        }
+      )
+      .on("error", reject);
+  });
+}
+
+app.get("/api/update/check", async (_req: Request, res: Response) => {
+  const slug = repoSlug();
+  try {
+    const remote = await fetchJson(
+      `https://raw.githubusercontent.com/${slug}/main/package.json`
+    );
+    const latest = remote.version || null;
+    const updateAvailable =
+      !!latest && compareSemver(PKG_JSON.version, latest) < 0;
+    const out: UpdateCheckResponse = {
+      current: PKG_JSON.version,
+      latest,
+      updateAvailable,
+      repo: slug,
+    };
+    res.json(out);
+  } catch (err: any) {
+    const out: UpdateCheckResponse = {
+      current: PKG_JSON.version,
+      latest: null,
+      updateAvailable: false,
+      repo: slug,
+      error: err.message,
+    };
+    res.json(out);
+  }
+});
+
+app.post("/api/update/install", async (_req: Request, res: Response) => {
+  const slug = repoSlug();
+  const child = spawn(
+    "npm",
+    ["install", "-g", `github:${slug}`, "--force"],
+    { env: process.env }
+  );
+
+  let output = "";
+  child.stdout.on("data", (d: Buffer) => {
+    output += d.toString();
+  });
+  child.stderr.on("data", (d: Buffer) => {
+    output += d.toString();
+  });
+
+  child.on("error", (err: Error) => {
+    const out: UpdateInstallResponse = {
+      ok: false,
+      output: output + `\n${err.message}`,
+      exitCode: null,
+      error: err.message,
+    };
+    res.status(500).json(out);
+  });
+
+  child.on("close", (code: number | null) => {
+    const out: UpdateInstallResponse = {
+      ok: code === 0,
+      output,
+      exitCode: code,
+    };
+    res.status(code === 0 ? 200 : 500).json(out);
+  });
+});
+
+// Auto-start needs Electron's app API (only available when this server is
+// embedded in the menubar process, not when run as standalone Node).
+const IS_ELECTRON = !!(process.versions as any).electron;
+
+function loadConfigModule(): typeof import("./config") | null {
+  if (!IS_ELECTRON) return null;
+  try {
+    return require("./config") as typeof import("./config");
+  } catch {
+    return null;
+  }
+}
+
+app.get("/api/autostart", (_req: Request, res: Response) => {
+  const cfg = loadConfigModule();
+  if (!cfg) {
+    const out: AutoStartResponse = { enabled: false, supported: false };
+    return res.json(out);
+  }
+  const enabled = cfg.getLoginItemSettings().openAtLogin;
+  const out: AutoStartResponse = { enabled, supported: true };
+  res.json(out);
+});
+
+app.post("/api/autostart", express.json(), (req: Request, res: Response) => {
+  const cfg = loadConfigModule();
+  if (!cfg) {
+    return res
+      .status(400)
+      .json({ error: "Auto-start is only available in the menubar app" });
+  }
+  const enable = !!req.body?.enabled;
+  cfg.applyLoginItem(enable);
+  const out: AutoStartResponse = { enabled: enable, supported: true };
+  res.json(out);
 });
 
 // ---------------------------------------------------------------------------

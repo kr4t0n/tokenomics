@@ -1,32 +1,59 @@
 {
   "name": "tokenomics",
-  "version": "1.0.0",
-  "description": "Dashboard to track token/request usage across AI coding platforms",
+  "version": "1.1.0",
+  "description": "Dashboard to track token/request usage across AI coding platforms (Cursor, Codex)",
   "main": "dist/menubar.js",
+  "bin": {
+    "tokenomics": "./bin/tokenomics.js"
+  },
   "scripts": {
     "build": "tsc",
+    "start": "tsc && node bin/tokenomics.js",
     "menubar": "tsc && electron dist/menubar.js",
-    "dist": "tsc && electron-builder --mac"
+    "dist": "tsc && electron-builder --mac",
+    "postinstall": "tsc || true"
   },
   "keywords": [
     "cursor",
+    "codex",
     "usage",
     "dashboard",
-    "tokens"
+    "tokens",
+    "menubar"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kr4t0n/tokenomics.git"
+  },
+  "homepage": "https://github.com/kr4t0n/tokenomics#readme",
+  "bugs": {
+    "url": "https://github.com/kr4t0n/tokenomics/issues"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "public/",
+    "src/",
+    "tsconfig.json",
+    "README.md",
+    "AGENTS.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
+    "electron": "^34.5.8",
     "express": "^4.21.2",
-    "menubar": "^9.5.2"
+    "menubar": "^9.5.2",
+    "typescript": "^6.0.2"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.6",
     "@types/node": "^25.5.2",
-    "electron": "^34.5.8",
-    "electron-builder": "^26.8.1",
-    "typescript": "^6.0.2"
+    "electron-builder": "^26.8.1"
   },
   "build": {
     "appId": "com.tokenomics.app",

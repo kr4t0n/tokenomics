@@ -3,94 +3,143 @@ import { menubar, Menubar } from "menubar";
 import path from "path";
 import { execSync } from "child_process";
 import expressApp from "./server";
+import {
+  readUserConfig,
+  applyLoginItem,
+  getLoginItemSettings,
+} from "./config";
 import type { TeamDashboardResponse, CursorUsageResponse } from "./types";
 
 const PORT = 47836;
 let mb: Menubar;
 let refreshInterval: ReturnType<typeof setInterval>;
 
-const gotLock = electronApp.requestSingleInstanceLock();
-if (!gotLock) {
-  electronApp.quit();
-}
-
-electronApp.whenReady().then(() => {
-  try {
-    execSync(`lsof -ti:${PORT} | xargs kill -9 2>/dev/null`, {
-      stdio: "ignore",
-    });
-  } catch {}
-
-  const server = expressApp.listen(PORT, () => {
-    console.log(`[menubar] API server on port ${PORT}`);
+// CLI flags can be passed through `tokenomics --enable-autostart` /
+// `tokenomics --disable-autostart` to manage the macOS login item without
+// opening the menubar UI.
+const argv = process.argv.slice(2);
+if (argv.includes("--enable-autostart") || argv.includes("--disable-autostart")) {
+  electronApp.whenReady().then(() => {
+    const enable = argv.includes("--enable-autostart");
+    applyLoginItem(enable);
+    const state = getLoginItemSettings();
+    console.log(
+      `[menubar] login item ${state.openAtLogin ? "enabled" : "disabled"}`
+    );
+    electronApp.exit(0);
   });
-  server.on("error", (err: Error) => {
-    console.error(`[menubar] Failed to start server: ${err.message}`);
+} else {
+  electronApp.setName("tokenomics");
+  electronApp.dock?.hide();
+
+  const gotLock = electronApp.requestSingleInstanceLock();
+  if (!gotLock) {
     electronApp.quit();
-  });
-
-  const icon = nativeImage.createFromDataURL(
-    "data:image/png;base64," +
-      "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAK" +
-      "NJREFUWEft1kEKwCAMRNH0/oduF0KhxpiZSbqQrIT8p6JW55xb8arF+Y8AlAV2t7vf" +
-      "r7e+bzcAyQKiAEkCVAEpAnQCEgRYBEQL8AiIFOATECXAKyBCQISASAFxArwC0AKQAu" +
-      "IFeAWgBWQI8ApAC8gS4BWAFpApwCsALSBbgFcAWkAJArwC0AJKEeATgBZQkgCfALSA" +
-      "0gT4BKAF/F3AD7YpMCFDCyaqAAAAAElFTkSuQmCC"
-  );
-  icon.setTemplateImage(true);
-
-  mb = menubar({
-    index: `http://localhost:${PORT}/menubar.html`,
-    icon,
-    preloadWindow: true,
-    browserWindow: {
-      width: 320,
-      height: 200,
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-      },
-    },
-    showDockIcon: false,
-    showOnAllWorkspaces: false,
-  });
-
-  mb.on("ready", () => {
-    console.log("[menubar] ready");
-    updateTrayTitle();
-    refreshInterval = setInterval(updateTrayTitle, 60_000);
-
-    const contextMenu = Menu.buildFromTemplate([
-      { label: "Refresh", click: () => { updateTrayTitle(); mb.window?.webContents.reload(); } },
-      { type: "separator" },
-      { label: "Quit", click: () => electronApp.quit() },
-    ]);
-    mb.tray.on("right-click", () => {
-      mb.tray.popUpContextMenu(contextMenu);
-    });
-  });
-
-  mb.on("after-show", () => {
-    mb.window?.webContents.send("refresh");
-    resizeToFit();
-  });
-
-  function resizeToFit(): void {
-    if (!mb.window) return;
-    mb.window.webContents
-      .executeJavaScript(`document.body.scrollHeight`)
-      .then((h: number) => {
-        mb.window!.setSize(320, Math.min(Math.max(h + 8, 100), 700));
-      })
-      .catch(() => {});
   }
 
-  electronApp.on("web-contents-created", (_e, wc) => {
-    wc.on("console-message", (_ev, _level, msg) => {
-      if (msg === "__resize__") resizeToFit();
+  electronApp.whenReady().then(() => {
+    try {
+      execSync(`lsof -ti:${PORT} | xargs kill -9 2>/dev/null`, {
+        stdio: "ignore",
+      });
+    } catch {}
+
+    // Apply persisted auto-start preference on every launch so the macOS
+    // login item registration stays in sync with the user's saved choice.
+    try {
+      const cfg = readUserConfig();
+      applyLoginItem(cfg.autoStart);
+    } catch (err) {
+      console.warn(
+        `[menubar] could not apply login item: ${(err as Error).message}`
+      );
+    }
+
+    const server = expressApp.listen(PORT, () => {
+      console.log(`[menubar] API server on port ${PORT}`);
+    });
+    server.on("error", (err: Error) => {
+      console.error(`[menubar] Failed to start server: ${err.message}`);
+      electronApp.quit();
+    });
+
+    const icon = nativeImage.createFromDataURL(
+      "data:image/png;base64," +
+        "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAK" +
+        "NJREFUWEft1kEKwCAMRNH0/oduF0KhxpiZSbqQrIT8p6JW55xb8arF+Y8AlAV2t7vf" +
+        "r7e+bzcAyQKiAEkCVAEpAnQCEgRYBEQL8AiIFOATECXAKyBCQISASAFxArwC0AKQAu" +
+        "IFeAWgBWQI8ApAC8gS4BWAFpApwCsALSBbgFcAWkAJArwC0AJKEeATgBZQkgCfALSA" +
+        "0gT4BKAF/F3AD7YpMCFDCyaqAAAAAElFTkSuQmCC"
+    );
+    icon.setTemplateImage(true);
+
+    mb = menubar({
+      index: `http://localhost:${PORT}/menubar.html`,
+      icon,
+      preloadWindow: true,
+      browserWindow: {
+        width: 320,
+        height: 200,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+        },
+      },
+      showDockIcon: false,
+      showOnAllWorkspaces: false,
+    });
+
+    mb.on("ready", () => {
+      console.log("[menubar] ready");
+      updateTrayTitle();
+      refreshInterval = setInterval(updateTrayTitle, 60_000);
+
+      const contextMenu = Menu.buildFromTemplate([
+        {
+          label: "Refresh",
+          click: () => {
+            updateTrayTitle();
+            mb.window?.webContents.reload();
+          },
+        },
+        { type: "separator" },
+        { label: "Quit", click: () => electronApp.quit() },
+      ]);
+      mb.tray.on("right-click", () => {
+        mb.tray.popUpContextMenu(contextMenu);
+      });
+    });
+
+    mb.on("after-show", () => {
+      mb.window?.webContents.send("refresh");
+      resizeToFit();
+    });
+
+    function resizeToFit(): void {
+      if (!mb.window) return;
+      mb.window.webContents
+        .executeJavaScript(`document.body.scrollHeight`)
+        .then((h: number) => {
+          mb.window!.setSize(320, Math.min(Math.max(h + 8, 100), 700));
+        })
+        .catch(() => {});
+    }
+
+    electronApp.on("web-contents-created", (_e, wc) => {
+      wc.on("console-message", (_ev, _level, msg) => {
+        if (msg === "__resize__") resizeToFit();
+      });
     });
   });
-});
+
+  electronApp.on("before-quit", () => {
+    if (refreshInterval) clearInterval(refreshInterval);
+  });
+
+  electronApp.on("window-all-closed", () => {
+    // Prevent default quit — keep the menubar app alive
+  });
+}
 
 async function updateTrayTitle(): Promise<void> {
   try {
@@ -137,6 +186,6 @@ async function updateTrayTitle(): Promise<void> {
   }
 }
 
-electronApp.on("window-all-closed", () => {
-  // Prevent default quit — keep the menubar app alive
-});
+// Suppress "imported but unused" lint when path is conditionally referenced
+// in future migrations.
+void path;
