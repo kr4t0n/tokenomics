@@ -142,10 +142,15 @@ async function cmdCheck() {
 }
 
 function cmdUpdate() {
-  console.log(`Installing latest tokenomics from github:${REPO_SLUG}...`);
+  // Install via the GitHub tarball URL rather than the `github:` shorthand:
+  // npm 10 symlinks `github:` installs to a temp git-clone in
+  // ~/.npm/_cacache/tmp/ that gets pruned, leaving a broken global symlink.
+  // The tarball URL goes through the regular tarball install path.
+  const tarball = `https://github.com/${REPO_SLUG}/tarball/main`;
+  console.log(`Installing latest tokenomics from ${tarball}...`);
   const result = spawnSync(
     "npm",
-    ["install", "-g", `github:${REPO_SLUG}`, "--force"],
+    ["install", "-g", tarball, "--force"],
     { stdio: "inherit" }
   );
   if (result.status !== 0) {
@@ -212,7 +217,7 @@ function ensureBuilt() {
   );
   if (!fs.existsSync(tscBin)) {
     console.error(
-      `Could not find ${tscBin}. Re-run \`npm install -g github:${REPO_SLUG}\` to repair the install.`
+      `Could not find ${tscBin}. Re-run \`npm install -g https://github.com/${REPO_SLUG}/tarball/main\` to repair the install.`
     );
     process.exit(1);
   }

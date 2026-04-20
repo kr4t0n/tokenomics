@@ -120,8 +120,16 @@ users can toggle the login item without opening the UI.
 - **`npm install -g` paths**: under nvm the global bin is per-version, so the
   user may need to re-run install after switching Node versions.
 - **No `postinstall` script** — see "Distribution Model" above. If you ever
-  add one back, re-test `npm install -g github:kr4t0n/tokenomics` against
-  Homebrew's prefix to confirm it doesn't trip the `spawn sh ENOENT` race.
+  add one back, re-test global installs against Homebrew's prefix to confirm
+  it doesn't trip the `spawn sh ENOENT` race.
+- **`github:` shorthand is broken on npm 10** — `npm install -g github:owner/repo`
+  symlinks the global package to a temp git-clone in
+  `~/.npm/_cacache/tmp/git-clone…/`, which npm then prunes, leaving a
+  dangling symlink at `/opt/homebrew/lib/node_modules/<pkg>`. Install
+  instructions, `cmdUpdate()` in `bin/tokenomics.js`, and the
+  `POST /api/update/install` route therefore all use the tarball URL
+  (`https://github.com/<slug>/tarball/main`) instead. Do not switch back to
+  `github:` shorthand without re-validating.
 - **First-launch latency**: `tokenomics start` invokes `tsc` once when
   `dist/menubar.js` is missing, which adds ~1–2 s to the very first launch.
   Subsequent launches skip the build.

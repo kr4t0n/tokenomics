@@ -29,7 +29,7 @@ standalone web dashboard.
 Install once with npm and the `tokenomics` command becomes globally available:
 
 ```bash
-npm install -g github:kr4t0n/tokenomics
+npm install -g https://github.com/kr4t0n/tokenomics/tarball/main
 ```
 
 This installs a tiny CLI wrapper that launches an Electron menubar app from
@@ -37,11 +37,12 @@ This installs a tiny CLI wrapper that launches an Electron menubar app from
 team, macOS Gatekeeper trusts it when launched as a child process of your
 terminal — no developer certificate required.
 
-You can also run it without installing:
-
-```bash
-npx github:kr4t0n/tokenomics
-```
+> **Why the tarball URL instead of `github:kr4t0n/tokenomics`?**
+> npm 10 has a regression where `github:` shorthand installs are symlinked
+> into `~/.npm/_cacache/tmp/git-clone…/`, which is then pruned — leaving a
+> broken global symlink. Installing from the GitHub tarball URL goes through
+> npm's normal tarball install path and works reliably. The in-app
+> "Install update" button and `tokenomics update` use the same URL.
 
 ### From a local clone (development)
 

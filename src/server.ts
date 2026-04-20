@@ -696,9 +696,12 @@ app.get("/api/update/check", async (_req: Request, res: Response) => {
 
 app.post("/api/update/install", async (_req: Request, res: Response) => {
   const slug = repoSlug();
+  // Tarball URL — see comment in `bin/tokenomics.js#cmdUpdate`. The
+  // `github:` shorthand crashes npm 10 with broken cache symlinks.
+  const tarball = `https://github.com/${slug}/tarball/main`;
   const child = spawn(
     "npm",
-    ["install", "-g", `github:${slug}`, "--force"],
+    ["install", "-g", tarball, "--force"],
     { env: process.env }
   );
 
