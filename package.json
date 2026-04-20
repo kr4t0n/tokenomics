@@ -42,6 +42,9 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.5.2",
     "electron": "^34.5.8",
     "express": "^4.21.2",
     "menubar": "^9.5.2",
@@ -51,9 +54,6 @@
     "better-sqlite3": "^11.8.1"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/express": "^5.0.6",
-    "@types/node": "^25.5.2",
     "electron-builder": "^26.8.1"
   },
   "build": {

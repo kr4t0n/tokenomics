@@ -222,17 +222,24 @@ function ensureBuilt() {
     process.exit(1);
   }
 
-  console.log("Compiling tokenomics (first launch)...");
+  process.stdout.write("Compiling tokenomics (first launch)... ");
+  // Buffer tsc output and only surface it on failure. tsc emits JS even
+  // when there are type-only errors, so a noisy build that still produced
+  // dist/menubar.js is not actually broken.
   const result = spawnSync(tscBin, [], {
     cwd: PKG_ROOT,
-    stdio: "inherit",
+    encoding: "utf-8",
   });
   if (!fs.existsSync(entry)) {
+    process.stdout.write("failed.\n");
+    if (result.stdout) process.stderr.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
     console.error(
-      `tsc finished with exit code ${result.status} and dist/menubar.js was not produced.`
+      `\ntsc finished with exit code ${result.status} and dist/menubar.js was not produced.`
     );
     process.exit(result.status ?? 1);
   }
+  process.stdout.write("done.\n");
   return entry;
 }
 
