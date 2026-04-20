@@ -43,11 +43,13 @@
     "node": ">=18"
   },
   "dependencies": {
-    "better-sqlite3": "^11.8.1",
     "electron": "^34.5.8",
     "express": "^4.21.2",
     "menubar": "^9.5.2",
     "typescript": "^6.0.2"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^11.8.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

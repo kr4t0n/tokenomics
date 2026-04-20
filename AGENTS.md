@@ -105,7 +105,13 @@ users can toggle the login item without opening the UI.
 
 - The `chatgpt.com/backend-api/wham/usage` endpoint is an internal/unofficial API. Its response shape has changed before — the normalization logic in `parseCodexUsage()` handles known variations but may need updating if OpenAI changes it again.
 - Port 47836 is hardcoded in `menubar.ts`. The standalone server uses `PORT` env var (default 3000).
-- `better-sqlite3` is a native module — if it fails to load (e.g., architecture mismatch), the server falls back to the `sqlite3` CLI binary.
+- `better-sqlite3` is a native module listed in **`optionalDependencies`** —
+  if its prebuilt binary or compile step fails (architecture mismatch,
+  Node-version mismatch, or the well-known `npm install -g` "spawn sh ENOENT"
+  race against Homebrew-managed prefixes), npm continues installing the rest
+  of the package and the server falls back to the `/usr/bin/sqlite3` CLI
+  binary at runtime. Do NOT promote it back to `dependencies` without
+  re-validating global installs on macOS.
 - The Electron app kills anything on port 47836 at startup (`lsof -ti:PORT | xargs kill -9`).
 - **`npm install -g` paths**: under nvm the global bin is per-version, so the
   user may need to re-run install after switching Node versions.
