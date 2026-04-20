@@ -33,9 +33,13 @@ import `electron`.
 Shipped as an **npm CLI** rather than a packaged `.app`. This avoids
 Apple Developer / Gatekeeper / notarization entirely:
 
-- `npm install -g github:kr4t0n/tokenomics` installs the package globally,
-  drops a `tokenomics` shim into the npm bin path, and runs the
-  `postinstall` script (`tsc || true`) to compile TypeScript to `dist/`.
+- `npm install -g github:kr4t0n/tokenomics` installs the package globally
+  and drops a `tokenomics` shim into the npm bin path. **There is no
+  `postinstall` script** — it was removed because npm 10 + Node ≥ 22 crashes
+  with `spawn sh ENOENT` while invoking lifecycle scripts inside Homebrew's
+  `/opt/homebrew/lib/node_modules/...` prefix. Instead, `bin/tokenomics.js`
+  lazily runs `tsc` on first launch (`ensureBuilt()`), and that work is
+  cached in `dist/` for every subsequent invocation.
 - `electron` and `typescript` are listed in **`dependencies`** (not
   `devDependencies`) because they are needed at runtime in a fresh global
   install.
@@ -115,6 +119,12 @@ users can toggle the login item without opening the UI.
 - The Electron app kills anything on port 47836 at startup (`lsof -ti:PORT | xargs kill -9`).
 - **`npm install -g` paths**: under nvm the global bin is per-version, so the
   user may need to re-run install after switching Node versions.
+- **No `postinstall` script** — see "Distribution Model" above. If you ever
+  add one back, re-test `npm install -g github:kr4t0n/tokenomics` against
+  Homebrew's prefix to confirm it doesn't trip the `spawn sh ENOENT` race.
+- **First-launch latency**: `tokenomics start` invokes `tsc` once when
+  `dist/menubar.js` is missing, which adds ~1–2 s to the very first launch.
+  Subsequent launches skip the build.
 - **Login item registration** uses the absolute path of the `tokenomics`
   shim. If the user moves/reinstalls the package, the registration is
   refreshed automatically on next launch via `applyLoginItem(cfg.autoStart)`.

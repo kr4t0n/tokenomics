@@ -10,8 +10,7 @@
     "build": "tsc",
     "start": "tsc && node bin/tokenomics.js",
     "menubar": "tsc && electron dist/menubar.js",
-    "dist": "tsc && electron-builder --mac",
-    "postinstall": "tsc || true"
+    "dist": "tsc && electron-builder --mac"
   },
   "keywords": [
     "cursor",

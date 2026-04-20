@@ -193,17 +193,48 @@ function getRunningPids() {
   }
 }
 
-async function cmdStart(args) {
-  const foreground = args.includes("--foreground") || args.includes("-f");
-  const electronBinary = require("electron");
+/**
+ * Compile TypeScript to dist/ on demand. We can't rely on a `postinstall`
+ * script because npm 10 + Node 23 + Homebrew-managed global prefixes hits
+ * a `spawn sh ENOENT` race when running lifecycle scripts during
+ * `npm install -g`. Doing the build at first launch sidesteps that
+ * entirely and is invisible after the initial run.
+ */
+function ensureBuilt() {
   const entry = path.join(PKG_ROOT, "dist", "menubar.js");
+  if (fs.existsSync(entry)) return entry;
 
-  if (!fs.existsSync(entry)) {
+  const tscBin = path.join(
+    PKG_ROOT,
+    "node_modules",
+    ".bin",
+    process.platform === "win32" ? "tsc.cmd" : "tsc"
+  );
+  if (!fs.existsSync(tscBin)) {
     console.error(
-      `Could not find ${entry}. Did you run \`npm run build\` (or install via npm)?`
+      `Could not find ${tscBin}. Re-run \`npm install -g github:${REPO_SLUG}\` to repair the install.`
     );
     process.exit(1);
   }
+
+  console.log("Compiling tokenomics (first launch)...");
+  const result = spawnSync(tscBin, [], {
+    cwd: PKG_ROOT,
+    stdio: "inherit",
+  });
+  if (!fs.existsSync(entry)) {
+    console.error(
+      `tsc finished with exit code ${result.status} and dist/menubar.js was not produced.`
+    );
+    process.exit(result.status ?? 1);
+  }
+  return entry;
+}
+
+async function cmdStart(args) {
+  const foreground = args.includes("--foreground") || args.includes("-f");
+  const electronBinary = require("electron");
+  const entry = ensureBuilt();
 
   if (await isAlreadyRunning()) {
     console.log(
